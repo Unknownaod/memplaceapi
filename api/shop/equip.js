@@ -15,13 +15,44 @@ const EQUIPMENT_TYPES = new Set([
 
 
 /* ==========================================
+   PROFILE TITLE ITEMS
+
+   These are profile_cosmetic items,
+   but use the title equipment slot instead
+   of the nameplate slot.
+========================================== */
+
+const PROFILE_TITLE_ITEMS = new Set([
+  "legendary-title"
+]);
+
+
+/* ==========================================
    GET EQUIPMENT FIELD
 ========================================== */
 
-function getEquipmentField(type) {
+function getEquipmentField(item) {
+
+  /* ------------------------------------------
+     PROFILE TITLE
+  ------------------------------------------ */
 
   if (
-    type === "profile_cosmetic"
+    item.type === "profile_cosmetic" &&
+    PROFILE_TITLE_ITEMS.has(item._id)
+  ) {
+
+    return "equippedTitle";
+
+  }
+
+
+  /* ------------------------------------------
+     PROFILE NAMEPLATE
+  ------------------------------------------ */
+
+  if (
+    item.type === "profile_cosmetic"
   ) {
 
     return "equippedNameplate";
@@ -29,8 +60,12 @@ function getEquipmentField(type) {
   }
 
 
+  /* ------------------------------------------
+     PROFILE BADGE
+  ------------------------------------------ */
+
   if (
-    type === "profile_badge"
+    item.type === "profile_badge"
   ) {
 
     return "equippedBadge";
@@ -38,8 +73,12 @@ function getEquipmentField(type) {
   }
 
 
+  /* ------------------------------------------
+     PROFILE THEME
+  ------------------------------------------ */
+
   if (
-    type === "profile_theme"
+    item.type === "profile_theme"
   ) {
 
     return "equippedTheme";
@@ -48,6 +87,55 @@ function getEquipmentField(type) {
 
 
   return null;
+
+}
+
+
+/* ==========================================
+   GET EQUIPMENT STATE
+========================================== */
+
+function buildEquipmentState(
+  equipmentField,
+  itemId,
+  equipped
+) {
+
+  return {
+
+    equippedNameplate:
+      equipmentField ===
+      "equippedNameplate"
+        ? equipped
+          ? itemId
+          : null
+        : undefined,
+
+    equippedBadge:
+      equipmentField ===
+      "equippedBadge"
+        ? equipped
+          ? itemId
+          : null
+        : undefined,
+
+    equippedTheme:
+      equipmentField ===
+      "equippedTheme"
+        ? equipped
+          ? itemId
+          : null
+        : undefined,
+
+    equippedTitle:
+      equipmentField ===
+      "equippedTitle"
+        ? equipped
+          ? itemId
+          : null
+        : undefined
+
+  };
 
 }
 
@@ -62,6 +150,10 @@ export default async function handler(req, res) {
     return;
   }
 
+
+  /* ==========================================
+     METHOD
+  ========================================== */
 
   if (req.method !== "POST") {
 
@@ -94,7 +186,7 @@ export default async function handler(req, res) {
 
 
     /* ==========================================
-       VALIDATE REQUEST
+       VALIDATE ITEM ID
     ========================================== */
 
     const itemId =
@@ -102,6 +194,10 @@ export default async function handler(req, res) {
         ? req.body.itemId.trim()
         : "";
 
+
+    /* ==========================================
+       VALIDATE ACTION
+    ========================================== */
 
     const action =
       typeof req.body?.action === "string"
@@ -178,8 +274,10 @@ export default async function handler(req, res) {
 
       return res.status(400).json({
         success: false,
-        error: "This item cannot be equipped",
-        code: "ITEM_NOT_EQUIPPABLE"
+        error:
+          "This item cannot be equipped",
+        code:
+          "ITEM_NOT_EQUIPPABLE"
       });
 
     }
@@ -190,9 +288,7 @@ export default async function handler(req, res) {
     ========================================== */
 
     const equipmentField =
-      getEquipmentField(
-        item.type
-      );
+      getEquipmentField(item);
 
 
     if (!equipmentField) {
@@ -201,7 +297,8 @@ export default async function handler(req, res) {
         success: false,
         error:
           "This item has no valid equipment slot",
-        code: "INVALID_EQUIPMENT_SLOT"
+        code:
+          "INVALID_EQUIPMENT_SLOT"
       });
 
     }
@@ -210,7 +307,7 @@ export default async function handler(req, res) {
     /* ==========================================
        CHECK OWNERSHIP
 
-       Ownership is required for BOTH
+       Ownership is required for both
        equip and unequip.
     ========================================== */
 
@@ -218,6 +315,7 @@ export default async function handler(req, res) {
       await db
         .collection("minigame_inventory")
         .findOne({
+
           _id:
             `${user._id}:${item._id}`,
 
@@ -226,6 +324,7 @@ export default async function handler(req, res) {
 
           itemId:
             item._id
+
         });
 
 
@@ -235,7 +334,8 @@ export default async function handler(req, res) {
         success: false,
         error:
           "You do not own this item",
-        code: "ITEM_NOT_OWNED"
+        code:
+          "ITEM_NOT_OWNED"
       });
 
     }
@@ -253,6 +353,7 @@ export default async function handler(req, res) {
         await db
           .collection("minigame_users")
           .updateOne(
+
             {
               _id:
                 user._id
@@ -260,13 +361,16 @@ export default async function handler(req, res) {
 
             {
               $set: {
+
                 [equipmentField]:
                   item._id,
 
                 updatedAt:
                   new Date()
+
               }
             }
+
           );
 
 
@@ -282,6 +386,10 @@ export default async function handler(req, res) {
 
       }
 
+
+      /* ==========================================
+         EQUIPMENT RESPONSE
+      ========================================== */
 
       return res.status(200).json({
 
@@ -310,27 +418,12 @@ export default async function handler(req, res) {
 
         },
 
-        equipment: {
-
-          equippedNameplate:
-            equipmentField ===
-            "equippedNameplate"
-              ? item._id
-              : null,
-
-          equippedBadge:
-            equipmentField ===
-            "equippedBadge"
-              ? item._id
-              : null,
-
-          equippedTheme:
-            equipmentField ===
-            "equippedTheme"
-              ? item._id
-              : null
-
-        }
+        equipment:
+          buildEquipmentState(
+            equipmentField,
+            item._id,
+            true
+          )
 
       });
 
@@ -345,36 +438,52 @@ export default async function handler(req, res) {
       await db
         .collection("minigame_users")
         .updateOne(
+
           {
+
             _id:
               user._id,
 
             [equipmentField]:
               item._id
+
           },
 
           {
+
             $set: {
+
               [equipmentField]:
                 null,
 
               updatedAt:
                 new Date()
+
             }
+
           }
+
         );
 
+
+    /* ==========================================
+       MAKE SURE ITEM WAS EQUIPPED
+    ========================================== */
 
     if (
       result.matchedCount === 0
     ) {
 
       return res.status(400).json({
+
         success: false,
+
         error:
           "This item is not currently equipped",
+
         code:
           "ITEM_NOT_EQUIPPED"
+
       });
 
     }
@@ -411,27 +520,12 @@ export default async function handler(req, res) {
 
       },
 
-      equipment: {
-
-        equippedNameplate:
-          equipmentField ===
-          "equippedNameplate"
-            ? null
-            : undefined,
-
-        equippedBadge:
-          equipmentField ===
-          "equippedBadge"
-            ? null
-            : undefined,
-
-        equippedTheme:
-          equipmentField ===
-          "equippedTheme"
-            ? null
-            : undefined
-
-      }
+      equipment:
+        buildEquipmentState(
+          equipmentField,
+          item._id,
+          false
+        )
 
     });
 
@@ -445,9 +539,12 @@ export default async function handler(req, res) {
 
 
     return res.status(500).json({
+
       success: false,
+
       error:
         "Internal server error"
+
     });
 
   }
