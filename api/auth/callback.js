@@ -239,21 +239,22 @@ export default async function handler(req, res) {
     });
 
 
-    /* ==========================================
-       SET SESSION COOKIE
-    ========================================== */
+/* ==========================================
+   SET SESSION COOKIE
+========================================== */
 
-    res.setHeader(
-      "Set-Cookie",
-      [
-        `mem_session=${encodeURIComponent(sessionId)}`,
-        "Path=/",
-        "HttpOnly",
-        "Secure",
-        "SameSite=Lax",
-        "Max-Age=2592000"
-      ].join("; ")
-    );
+res.setHeader(
+  "Set-Cookie",
+  [
+    `mem_session=${encodeURIComponent(sessionId)}`,
+    "Domain=.memplace.xyz",
+    "Path=/",
+    "HttpOnly",
+    "Secure",
+    "SameSite=Lax",
+    "Max-Age=2592000"
+  ].join("; ")
+);
 
 
     /* ==========================================
