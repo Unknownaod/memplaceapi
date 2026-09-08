@@ -104,6 +104,12 @@ export default async function handler(req, res) {
         equippedBadge:
           null,
 
+        /*
+         * Profile theme
+         */
+        equippedTheme:
+          null,
+
         createdAt:
           now,
 
@@ -115,6 +121,66 @@ export default async function handler(req, res) {
       await db
         .collection("minigame_users")
         .insertOne(minigameUser);
+
+    } else {
+
+      /*
+       * Make sure older accounts have
+       * the new theme field.
+       */
+
+      const updates = {};
+
+      if (
+        !Object.prototype.hasOwnProperty.call(
+          minigameUser,
+          "equippedNameplate"
+        )
+      ) {
+        updates.equippedNameplate = null;
+      }
+
+      if (
+        !Object.prototype.hasOwnProperty.call(
+          minigameUser,
+          "equippedBadge"
+        )
+      ) {
+        updates.equippedBadge = null;
+      }
+
+      if (
+        !Object.prototype.hasOwnProperty.call(
+          minigameUser,
+          "equippedTheme"
+        )
+      ) {
+        updates.equippedTheme = null;
+      }
+
+      if (
+        Object.keys(updates).length > 0
+      ) {
+
+        updates.updatedAt = now;
+
+        await db
+          .collection("minigame_users")
+          .updateOne(
+            {
+              _id: user._id
+            },
+            {
+              $set: updates
+            }
+          );
+
+        minigameUser = {
+          ...minigameUser,
+          ...updates
+        };
+      }
+
     }
 
 
@@ -166,11 +232,18 @@ export default async function handler(req, res) {
         chessRating:
           minigameUser.chessRating,
 
+        /*
+         * Equipped cosmetics
+         */
+
         equippedNameplate:
           minigameUser.equippedNameplate || null,
 
         equippedBadge:
-          minigameUser.equippedBadge || null
+          minigameUser.equippedBadge || null,
+
+        equippedTheme:
+          minigameUser.equippedTheme || null
       }
     });
 
