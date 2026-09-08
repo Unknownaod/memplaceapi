@@ -1,0 +1,15 @@
+{
+  "name": "memplace-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "mongodb": "^6.19.0"
+  },
+  "devDependencies": {
+    "vercel": "^48.0.0"
+  }
+}
