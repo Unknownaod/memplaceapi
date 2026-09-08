@@ -1,12 +1,10 @@
 import { setCors } from "../../lib/cors.js";
 import {
-  requireStaff,
   getStaffMember,
-  getRoleLevel,
-  STAFF_ROLES
+  getRoleLevel
 } from "../../lib/staff.js";
 import { getDb } from "../../lib/mongodb.js";
-import { getAuthenticatedUser } from "../../lib/auth.js";
+import { createAuditLog } from "../../lib/audit.js";
 
 
 /* ==========================================
@@ -33,10 +31,9 @@ export default async function handler(req, res) {
 
   try {
 
-    /*
-     * Every request to this endpoint requires
-     * staff access.
-     */
+    /* ========================================
+       STAFF AUTHENTICATION
+    ======================================== */
 
     const staff =
       await getStaffMember(req);
@@ -63,8 +60,8 @@ export default async function handler(req, res) {
     if (req.method === "GET") {
 
       /*
-       * Only staff with the "staff"
-       * permission can view the staff list.
+       * Only managers and owners can view
+       * the staff management section.
        */
 
       if (
@@ -98,26 +95,28 @@ export default async function handler(req, res) {
 
         success: true,
 
-        staff: staffMembers.map(member => ({
+        staff:
+          staffMembers.map(member => ({
 
-          id: member._id,
+            id:
+              member._id,
 
-          username:
-            member.username || null,
+            username:
+              member.username || null,
 
-          discordUsername:
-            member.discordUsername || null,
+            discordUsername:
+              member.discordUsername || null,
 
-          role:
-            member.role,
+            role:
+              member.role,
 
-          createdAt:
-            member.createdAt || null,
+            createdAt:
+              member.createdAt || null,
 
-          updatedAt:
-            member.updatedAt || null
+            updatedAt:
+              member.updatedAt || null
 
-        }))
+          }))
 
       });
 
@@ -199,10 +198,8 @@ export default async function handler(req, res) {
 
 
       /*
-       * Managers can only create roles below
-       * their own role.
-       *
-       * Owner can create anything.
+       * Managers cannot create a role equal to
+       * or higher than their own.
        */
 
       if (
@@ -222,7 +219,7 @@ export default async function handler(req, res) {
 
       /*
        * Make sure the Discord account actually
-       * exists in the site's users collection.
+       * exists on the website.
        */
 
       const user =
@@ -273,7 +270,8 @@ export default async function handler(req, res) {
 
       const newStaff = {
 
-        _id: discordId,
+        _id:
+          discordId,
 
         username:
           user.username ||
@@ -297,6 +295,38 @@ export default async function handler(req, res) {
       await db
         .collection("staff_users")
         .insertOne(newStaff);
+
+
+      /* ========================================
+         AUDIT LOG
+      ======================================== */
+
+      await createAuditLog({
+
+        staff,
+
+        action:
+          "staff_added",
+
+        targetType:
+          "staff",
+
+        targetId:
+          discordId,
+
+        details: {
+
+          username:
+            newStaff.username,
+
+          discordUsername:
+            newStaff.discordUsername,
+
+          role
+
+        }
+
+      });
 
 
       return res.status(201).json({
@@ -395,8 +425,7 @@ export default async function handler(req, res) {
 
 
       /*
-       * Never allow modification of the owner
-       * through this endpoint.
+       * Find target staff member.
        */
 
       const target =
@@ -418,6 +447,10 @@ export default async function handler(req, res) {
       }
 
 
+      /*
+       * Never allow modification of owner.
+       */
+
       if (target.role === "owner") {
 
         return res.status(403).json({
@@ -430,7 +463,22 @@ export default async function handler(req, res) {
 
 
       /*
-       * A manager cannot modify another manager
+       * Prevent unnecessary role changes.
+       */
+
+      if (target.role === newRole) {
+
+        return res.status(400).json({
+          success: false,
+          error:
+            "That staff member already has this role."
+        });
+
+      }
+
+
+      /*
+       * Managers cannot modify another manager
        * or promote someone to manager.
        */
 
@@ -453,6 +501,10 @@ export default async function handler(req, res) {
       }
 
 
+      const oldRole =
+        target.role;
+
+
       const now =
         new Date();
 
@@ -465,11 +517,47 @@ export default async function handler(req, res) {
           },
           {
             $set: {
-              role: newRole,
-              updatedAt: now
+
+              role:
+                newRole,
+
+              updatedAt:
+                now
+
             }
           }
         );
+
+
+      /* ========================================
+         AUDIT LOG
+      ======================================== */
+
+      await createAuditLog({
+
+        staff,
+
+        action:
+          "staff_role_changed",
+
+        targetType:
+          "staff",
+
+        targetId:
+          discordId,
+
+        details: {
+
+          username:
+            target.username || null,
+
+          oldRole,
+
+          newRole
+
+        }
+
+      });
 
 
       return res.status(200).json({
@@ -607,6 +695,39 @@ export default async function handler(req, res) {
         .deleteOne({
           _id: discordId
         });
+
+
+      /* ========================================
+         AUDIT LOG
+      ======================================== */
+
+      await createAuditLog({
+
+        staff,
+
+        action:
+          "staff_removed",
+
+        targetType:
+          "staff",
+
+        targetId:
+          discordId,
+
+        details: {
+
+          username:
+            target.username || null,
+
+          discordUsername:
+            target.discordUsername || null,
+
+          role:
+            target.role
+
+        }
+
+      });
 
 
       return res.status(200).json({
