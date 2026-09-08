@@ -95,6 +95,15 @@ export default async function handler(req, res) {
         chessRating:
           1200,
 
+        /*
+         * Shop cosmetics
+         */
+        equippedNameplate:
+          null,
+
+        equippedBadge:
+          null,
+
         createdAt:
           now,
 
@@ -155,7 +164,13 @@ export default async function handler(req, res) {
           minigameUser.totalLost,
 
         chessRating:
-          minigameUser.chessRating
+          minigameUser.chessRating,
+
+        equippedNameplate:
+          minigameUser.equippedNameplate || null,
+
+        equippedBadge:
+          minigameUser.equippedBadge || null
       }
     });
 
