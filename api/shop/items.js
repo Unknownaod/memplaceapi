@@ -1,7 +1,79 @@
 import { setCors } from "../../lib/cors.js";
 import { getDb } from "../../lib/mongodb.js";
 
+const INITIAL_ITEMS = [
+  {
+    _id: "gold-nameplate",
+    name: "Gold Nameplate",
+    description:
+      "A premium gold profile nameplate.",
+    price: 500,
+    type: "profile_cosmetic",
+    icon: "✦",
+    active: true,
+    sortOrder: 1
+  },
+  {
+    _id: "royal-nameplate",
+    name: "Royal Nameplate",
+    description:
+      "A prestigious royal profile nameplate.",
+    price: 1000,
+    type: "profile_cosmetic",
+    icon: "♛",
+    active: true,
+    sortOrder: 2
+  },
+  {
+    _id: "diamond-nameplate",
+    name: "Diamond Nameplate",
+    description:
+      "An exclusive diamond profile nameplate.",
+    price: 2500,
+    type: "profile_cosmetic",
+    icon: "◆",
+    active: true,
+    sortOrder: 3
+  },
+  {
+    _id: "champion-badge",
+    name: "Champion Badge",
+    description:
+      "A prestigious badge for your profile.",
+    price: 5000,
+    type: "profile_badge",
+    icon: "♛",
+    active: true,
+    sortOrder: 4
+  }
+];
+
+async function ensureShopCatalog(db) {
+
+  const count =
+    await db
+      .collection("shop_items")
+      .countDocuments();
+
+  if (count > 0) {
+    return;
+  }
+
+  const now = new Date();
+
+  await db
+    .collection("shop_items")
+    .insertMany(
+      INITIAL_ITEMS.map(item => ({
+        ...item,
+        createdAt: now,
+        updatedAt: now
+      }))
+    );
+}
+
 export default async function handler(req, res) {
+
   if (setCors(req, res)) {
     return;
   }
@@ -14,18 +86,22 @@ export default async function handler(req, res) {
   }
 
   try {
+
     const db = await getDb();
 
-    const items = await db
-      .collection("shop_items")
-      .find({
-        active: true
-      })
-      .sort({
-        sortOrder: 1,
-        createdAt: 1
-      })
-      .toArray();
+    await ensureShopCatalog(db);
+
+    const items =
+      await db
+        .collection("shop_items")
+        .find({
+          active: true
+        })
+        .sort({
+          sortOrder: 1,
+          createdAt: 1
+        })
+        .toArray();
 
     return res.status(200).json({
       success: true,
@@ -41,6 +117,7 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
+
     console.error(
       "SHOP ITEMS ERROR:",
       error
