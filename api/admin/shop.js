@@ -14,6 +14,18 @@ import {
 
 
 /* ==========================================
+   ALLOWED SHOP ITEM TYPES
+========================================== */
+
+const ALLOWED_TYPES = new Set([
+  "profile_cosmetic",
+  "profile_title",
+  "profile_badge",
+  "profile_theme"
+]);
+
+
+/* ==========================================
    CLEAN ITEM
 ========================================== */
 
@@ -69,36 +81,43 @@ function cleanItem(item) {
 
 function createItemId(name) {
 
-  return String(name || "")
-    .toLowerCase()
-    .trim()
+  const base =
+    String(name || "")
+      .toLowerCase()
+      .trim()
 
-    /*
-     * Remove apostrophes.
-     */
-    .replace(
-      /['’]/g,
-      ""
-    )
+      /*
+       * Remove apostrophes.
+       */
+      .replace(
+        /['’]/g,
+        ""
+      )
 
-    /*
-     * Replace anything that
-     * isn't a letter or number
-     * with a dash.
-     */
-    .replace(
-      /[^a-z0-9]+/g,
-      "-"
-    )
+      /*
+       * Replace anything that
+       * isn't a letter or number
+       * with a dash.
+       */
+      .replace(
+        /[^a-z0-9]+/g,
+        "-"
+      )
 
-    /*
-     * Remove dashes from
-     * the beginning/end.
-     */
-    .replace(
-      /^-+|-+$/g,
-      ""
-    );
+      /*
+       * Remove dashes from
+       * the beginning/end.
+       */
+      .replace(
+        /^-+|-+$/g,
+        ""
+      );
+
+
+  return (
+    base ||
+    `item-${Date.now()}`
+  );
 
 }
 
@@ -327,6 +346,33 @@ export default async function handler(
 
 
       /* ==========================================
+         VALIDATE ITEM TYPE
+      ========================================== */
+
+      if (
+        !ALLOWED_TYPES.has(
+          cleanType
+        )
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error:
+            "Invalid item type.",
+
+          allowedTypes:
+            Array.from(
+              ALLOWED_TYPES
+            )
+
+        });
+
+      }
+
+
+      /* ==========================================
          VALIDATE PRICE
       ========================================== */
 
@@ -353,7 +399,7 @@ export default async function handler(
          GENERATE STRING ID
       ========================================== */
 
-      const itemId =
+      let itemId =
         createItemId(
           cleanName
         );
@@ -413,11 +459,13 @@ export default async function handler(
         await collection.findOne({
 
           name: {
+
             $regex:
               `^${escapedName}$`,
 
             $options:
               "i"
+
           }
 
         });
@@ -450,6 +498,9 @@ export default async function handler(
         /*
          * IMPORTANT:
          * Explicit string ID.
+         *
+         * This is required by the
+         * purchase/equip systems.
          */
         _id:
           itemId,
@@ -463,6 +514,14 @@ export default async function handler(
         price:
           cleanPrice,
 
+        /*
+         * One of:
+         *
+         * profile_cosmetic
+         * profile_title
+         * profile_badge
+         * profile_theme
+         */
         type:
           cleanType,
 
