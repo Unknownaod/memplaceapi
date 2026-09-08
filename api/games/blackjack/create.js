@@ -33,16 +33,12 @@ function createDeck() {
   const deck = [];
 
   for (const suit of suits) {
-
     for (const rank of ranks) {
-
       deck.push({
         suit,
         rank
       });
-
     }
-
   }
 
   return deck;
@@ -141,10 +137,6 @@ export default async function handler(req, res) {
 
   try {
 
-    /* ==========================================
-       AUTH
-    ========================================== */
-
     const user =
       await getAuthenticatedUser(req);
 
@@ -159,10 +151,6 @@ export default async function handler(req, res) {
 
     }
 
-
-    /* ==========================================
-       BODY
-    ========================================== */
 
     let body;
 
@@ -200,10 +188,6 @@ export default async function handler(req, res) {
     }
 
 
-    /* ==========================================
-       WAGER LIMIT
-    ========================================== */
-
     const MIN_WAGER = 10;
     const MAX_WAGER = 10000;
 
@@ -232,10 +216,6 @@ export default async function handler(req, res) {
       await getDb();
 
 
-    /* ==========================================
-       PREVENT MULTIPLE ACTIVE BLACKJACK GAMES
-    ========================================== */
-
     const existing =
       await db.collection("blackjack_games").findOne({
         userId: user._id,
@@ -254,22 +234,15 @@ export default async function handler(req, res) {
     }
 
 
-    /* ==========================================
-       CREATE DECK
-    ========================================== */
-
     const deck =
       shuffle(createDeck());
 
-
-    /* ==========================================
-       DEAL INITIAL CARDS
-    ========================================== */
 
     const playerCards = [
       deck.pop(),
       deck.pop()
     ];
+
 
     const dealerCards = [
       deck.pop(),
@@ -285,6 +258,14 @@ export default async function handler(req, res) {
       handValue(dealerCards);
 
 
+    const playerBlackjack =
+      isBlackjack(playerCards);
+
+
+    const dealerBlackjack =
+      isBlackjack(dealerCards);
+
+
     const gameId =
       crypto.randomBytes(24).toString("hex");
 
@@ -293,21 +274,9 @@ export default async function handler(req, res) {
       new Date();
 
 
-    /* ==========================================
-       DETERMINE INITIAL RESULT
-    ========================================== */
-
     let status = "active";
     let result = null;
     let payout = 0;
-
-
-    const playerBlackjack =
-      isBlackjack(playerCards);
-
-
-    const dealerBlackjack =
-      isBlackjack(dealerCards);
 
 
     if (
@@ -330,7 +299,6 @@ export default async function handler(req, res) {
 
         result = "blackjack";
 
-        // 3:2 payout + original wager
         payout =
           amount +
           Math.floor(amount * 1.5);
@@ -345,43 +313,241 @@ export default async function handler(req, res) {
     }
 
 
-    /* ==========================================
-       DEDUCT WAGER
-    ========================================== */
+    const session =
+      db.client?.startSession?.();
 
-    const account =
-      await db
-        .collection("minigame_users")
-        .findOneAndUpdate(
 
-          {
-            _id: user._id,
-            balance: {
-              $gte: amount
-            }
-          },
+    /*
+      getDb() currently returns the DB object, so use
+      the underlying MongoClient only if exposed.
 
-          {
-            $inc: {
-              balance: -amount,
-              totalWagered: amount,
-              gamesPlayed: 1
-            },
+      If your current mongodb.js does not expose the client,
+      use the atomic version below instead.
+    */
 
-            $set: {
-              updatedAt: now
-            }
+    if (!session) {
 
-          },
+      return res.status(500).json({
+        success: false,
+        error: "Database transaction is not available"
+      });
 
-          {
-            returnDocument: "after"
+    }
+
+
+    try {
+
+      let finalBalance = 0;
+
+
+      await session.withTransaction(
+        async () => {
+
+          const account =
+            await db
+              .collection("minigame_users")
+              .findOneAndUpdate(
+                {
+                  _id: user._id,
+                  balance: {
+                    $gte: amount
+                  }
+                },
+                {
+                  $inc: {
+                    balance: -amount,
+                    totalWagered: amount,
+                    gamesPlayed: 1
+                  },
+                  $set: {
+                    updatedAt: now
+                  }
+                },
+                {
+                  session,
+                  returnDocument: "after"
+                }
+              );
+
+
+          if (!account) {
+
+            throw new Error(
+              "INSUFFICIENT_BALANCE"
+            );
+
           }
 
-        );
+
+          finalBalance =
+            account.balance;
 
 
-    if (!account) {
+          if (payout > 0) {
+
+            await db
+              .collection("minigame_users")
+              .updateOne(
+                {
+                  _id: user._id
+                },
+                {
+                  $inc: {
+                    balance: payout,
+                    totalWon: payout,
+                    ...(result === "blackjack"
+                      ? { gamesWon: 1 }
+                      : {})
+                  },
+                  $set: {
+                    updatedAt: now
+                  }
+                },
+                {
+                  session
+                }
+              );
+
+
+            finalBalance += payout;
+
+          }
+
+
+          if (result === "loss") {
+
+            await db
+              .collection("minigame_users")
+              .updateOne(
+                {
+                  _id: user._id
+                },
+                {
+                  $inc: {
+                    gamesLost: 1
+                  },
+                  $set: {
+                    updatedAt: now
+                  }
+                },
+                {
+                  session
+                }
+              );
+
+          }
+
+
+          await db
+            .collection("blackjack_games")
+            .insertOne(
+              {
+                _id: gameId,
+
+                userId:
+                  user._id,
+
+                wager:
+                  amount,
+
+                deck,
+
+                playerCards,
+
+                dealerCards,
+
+                status,
+
+                result,
+
+                payout,
+
+                createdAt:
+                  now,
+
+                updatedAt:
+                  now,
+
+                ...(status === "settled"
+                  ? {
+                      settledAt: now
+                    }
+                  : {})
+              },
+              {
+                session
+              }
+            );
+
+        }
+      );
+
+
+      return res.status(200).json({
+
+        success: true,
+
+        gameId,
+
+        game: "blackjack",
+
+        wager:
+          amount,
+
+        status,
+
+        result,
+
+        payout,
+
+        player: {
+
+          cards:
+            playerCards,
+
+          total:
+            playerTotal
+
+        },
+
+        dealer: {
+
+          cards:
+            status === "active"
+              ? [
+                  dealerCards[0],
+                  {
+                    hidden: true
+                  }
+                ]
+              : dealerCards,
+
+          total:
+            status === "active"
+              ? null
+              : dealerTotal
+
+        },
+
+        balance:
+          finalBalance
+
+      });
+
+
+    } finally {
+
+      await session.endSession();
+
+    }
+
+
+  } catch (error) {
+
+    if (
+      error.message ===
+      "INSUFFICIENT_BALANCE"
+    ) {
 
       return res.status(400).json({
         success: false,
@@ -390,161 +556,6 @@ export default async function handler(req, res) {
 
     }
 
-
-    /* ==========================================
-       PAY IMMEDIATE RESULT
-    ========================================== */
-
-    if (payout > 0) {
-
-      await db
-        .collection("minigame_users")
-        .updateOne(
-
-          {
-            _id: user._id
-          },
-
-          {
-            $inc: {
-              balance: payout,
-              totalWon: payout,
-              ...(result === "blackjack"
-                ? { gamesWon: 1 }
-                : {})
-            },
-
-            $set: {
-              updatedAt: now
-            }
-
-          }
-
-        );
-
-    } else if (result === "loss") {
-
-      await db
-        .collection("minigame_users")
-        .updateOne(
-
-          {
-            _id: user._id
-          },
-
-          {
-            $inc: {
-              gamesLost: 1
-            },
-
-            $set: {
-              updatedAt: now
-            }
-
-          }
-
-        );
-
-    }
-
-
-    /* ==========================================
-       STORE GAME
-       
-       The deck stays server-side.
-    ========================================== */
-
-    await db.collection("blackjack_games").insertOne({
-
-      _id: gameId,
-
-      userId:
-        user._id,
-
-      wager:
-        amount,
-
-      deck,
-
-      playerCards,
-
-      dealerCards,
-
-      status,
-
-      result,
-
-      payout,
-
-      createdAt:
-        now,
-
-      updatedAt:
-        now,
-
-      ...(status === "settled"
-        ? { settledAt: now }
-        : {})
-
-    });
-
-
-    /* ==========================================
-       RESPONSE
-    ========================================== */
-
-    return res.status(200).json({
-
-      success: true,
-
-      gameId,
-
-      game: "blackjack",
-
-      wager:
-        amount,
-
-      status,
-
-      result,
-
-      payout,
-
-      player: {
-
-        cards:
-          playerCards,
-
-        total:
-          playerTotal
-
-      },
-
-      dealer: {
-
-        cards: status === "active"
-          ? [
-              dealerCards[0],
-              {
-                hidden: true
-              }
-            ]
-          : dealerCards,
-
-        total: status === "active"
-          ? null
-          : dealerTotal
-
-      },
-
-      balance:
-        account.balance +
-        payout
-
-    });
-
-
-  } catch (error) {
 
     console.error(
       "BLACKJACK CREATE ERROR:",
