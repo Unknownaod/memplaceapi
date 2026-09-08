@@ -2,8 +2,10 @@ import crypto from "crypto";
 
 import { setCors } from "../../../lib/cors.js";
 import { getAuthenticatedUser } from "../../../lib/auth.js";
-import { getDb } from "../../../lib/mongodb.js";
-
+import {
+  getDb,
+  getMongoClient
+} from "../../../lib/mongodb.js";
 
 function createDeck() {
 
@@ -312,9 +314,8 @@ export default async function handler(req, res) {
 
     }
 
-
-    const session =
-      db.client?.startSession?.();
+const session =
+  getMongoClient().startSession();
 
 
     /*
