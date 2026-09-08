@@ -174,7 +174,7 @@ export default async function handler(req, res) {
 
 
     const amount =
-      Number(body?.amount);
+      Number(body?.wager);
 
 
     if (
