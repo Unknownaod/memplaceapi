@@ -1,13 +1,21 @@
 import { setCors } from "../../lib/cors.js";
+
 import {
   requireStaff
 } from "../../lib/staff.js";
+
 import {
   createAuditLog
 } from "../../lib/audit.js";
+
 import {
   getDb
 } from "../../lib/mongodb.js";
+
+
+/* ==========================================
+   CLEAN ITEM
+========================================== */
 
 function cleanItem(item) {
 
@@ -16,19 +24,88 @@ function cleanItem(item) {
   }
 
   return {
-    _id: item._id,
-    name: item.name || "",
-    description: item.description || "",
-    price: Number(item.price) || 0,
-    icon: item.icon || "",
-    image: item.image || null,
-    active: item.active !== false,
-    createdAt: item.createdAt || null,
-    updatedAt: item.updatedAt || null
+
+    _id:
+      item._id,
+
+    name:
+      item.name || "",
+
+    description:
+      item.description || "",
+
+    price:
+      Number(item.price) || 0,
+
+    type:
+      item.type || "profile_cosmetic",
+
+    icon:
+      item.icon || "",
+
+    image:
+      item.image || null,
+
+    active:
+      item.active !== false,
+
+    limited:
+      item.limited === true,
+
+    createdAt:
+      item.createdAt || null,
+
+    updatedAt:
+      item.updatedAt || null
+
   };
 
 }
 
+
+/* ==========================================
+   CREATE STRING ITEM ID
+========================================== */
+
+function createItemId(name) {
+
+  return String(name || "")
+    .toLowerCase()
+    .trim()
+
+    /*
+     * Remove apostrophes.
+     */
+    .replace(
+      /['’]/g,
+      ""
+    )
+
+    /*
+     * Replace anything that
+     * isn't a letter or number
+     * with a dash.
+     */
+    .replace(
+      /[^a-z0-9]+/g,
+      "-"
+    )
+
+    /*
+     * Remove dashes from
+     * the beginning/end.
+     */
+    .replace(
+      /^-+|-+$/g,
+      ""
+    );
+
+}
+
+
+/* ==========================================
+   HANDLER
+========================================== */
 
 export default async function handler(
   req,
@@ -41,9 +118,10 @@ export default async function handler(
 
 
   /*
-   * Every Shop admin operation requires
-   * the Shop permission.
+   * Every Shop admin operation
+   * requires the Shop permission.
    */
+
   const staff =
     await requireStaff(
       req,
@@ -82,12 +160,14 @@ export default async function handler(
 
 
       return res.status(200).json({
+
         success: true,
 
         items:
           items.map(
             cleanItem
           )
+
       });
 
     } catch (error) {
@@ -98,9 +178,12 @@ export default async function handler(
       );
 
       return res.status(500).json({
+
         success: false,
+
         error:
           "Failed to load shop items."
+
       });
 
     }
@@ -115,8 +198,8 @@ export default async function handler(
   if (req.method === "POST") {
 
     /*
-     * Only Manager and Owner can
-     * modify Shop configuration.
+     * Only Manager and Owner
+     * can modify Shop configuration.
      */
 
     if (
@@ -125,9 +208,12 @@ export default async function handler(
     ) {
 
       return res.status(403).json({
+
         success: false,
+
         error:
           "Only Managers and Owners can modify the shop."
+
       });
 
     }
@@ -139,42 +225,66 @@ export default async function handler(
         name,
         description,
         price,
+        type,
         icon,
         image,
-        active
+        active,
+        limited
       } = req.body || {};
 
+
+      /* ==========================================
+         CLEAN INPUT
+      ========================================== */
 
       const cleanName =
         String(
           name || ""
         ).trim();
 
+
       const cleanDescription =
         String(
           description || ""
         ).trim();
+
+
+      const cleanType =
+        String(
+          type ||
+          "profile_cosmetic"
+        ).trim();
+
 
       const cleanIcon =
         String(
           icon || ""
         ).trim();
 
+
       const cleanImage =
         image
           ? String(image).trim()
           : null;
 
+
       const cleanPrice =
         Number(price);
 
 
+      /* ==========================================
+         VALIDATE NAME
+      ========================================== */
+
       if (!cleanName) {
 
         return res.status(400).json({
+
           success: false,
+
           error:
             "Item name is required."
+
         });
 
       }
@@ -185,26 +295,40 @@ export default async function handler(
       ) {
 
         return res.status(400).json({
+
           success: false,
+
           error:
             "Item name is too long."
+
         });
 
       }
 
+
+      /* ==========================================
+         VALIDATE DESCRIPTION
+      ========================================== */
 
       if (
         cleanDescription.length > 500
       ) {
 
         return res.status(400).json({
+
           success: false,
+
           error:
             "Description is too long."
+
         });
 
       }
 
+
+      /* ==========================================
+         VALIDATE PRICE
+      ========================================== */
 
       if (
         !Number.isInteger(
@@ -214,54 +338,133 @@ export default async function handler(
       ) {
 
         return res.status(400).json({
+
           success: false,
+
           error:
             "Price must be a whole number greater than or equal to zero."
+
         });
 
       }
 
 
-      /*
-       * Prevent duplicate item names.
-       */
+      /* ==========================================
+         GENERATE STRING ID
+      ========================================== */
+
+      const itemId =
+        createItemId(
+          cleanName
+        );
+
+
+      if (!itemId) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error:
+            "Unable to generate a valid item ID."
+
+        });
+
+      }
+
+
+      /* ==========================================
+         PREVENT DUPLICATE ITEM ID
+      ========================================== */
+
+      const existingId =
+        await collection.findOne({
+          _id:
+            itemId
+        });
+
+
+      if (existingId) {
+
+        return res.status(409).json({
+
+          success: false,
+
+          error:
+            "A shop item with that ID already exists."
+
+        });
+
+      }
+
+
+      /* ==========================================
+         PREVENT DUPLICATE ITEM NAME
+      ========================================== */
+
+      const escapedName =
+        cleanName.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&"
+        );
+
 
       const existing =
         await collection.findOne({
+
           name: {
             $regex:
-              `^${cleanName.replace(
-                /[.*+?^${}()|[\]\\]/g,
-                "\\$&"
-              )}$`,
-            $options: "i"
+              `^${escapedName}$`,
+
+            $options:
+              "i"
           }
+
         });
 
 
       if (existing) {
 
         return res.status(409).json({
+
           success: false,
+
           error:
             "A shop item with that name already exists."
+
         });
 
       }
 
+
+      /* ==========================================
+         CREATE ITEM
+      ========================================== */
 
       const now =
         new Date();
 
 
       const item = {
-        name: cleanName,
+
+        /*
+         * IMPORTANT:
+         * Explicit string ID.
+         */
+        _id:
+          itemId,
+
+        name:
+          cleanName,
 
         description:
           cleanDescription,
 
         price:
           cleanPrice,
+
+        type:
+          cleanType,
 
         icon:
           cleanIcon,
@@ -272,28 +475,33 @@ export default async function handler(
         active:
           active !== false,
 
+        limited:
+          limited === true,
+
         createdAt:
           now,
 
         updatedAt:
           now
+
       };
 
 
-      const result =
-        await collection.insertOne(
-          item
-        );
+      /* ==========================================
+         INSERT
+      ========================================== */
+
+      await collection.insertOne(
+        item
+      );
 
 
-      const created =
-        await collection.findOne({
-          _id:
-            result.insertedId
-        });
-
+      /* ==========================================
+         AUDIT LOG
+      ========================================== */
 
       await createAuditLog({
+
         staff,
 
         action:
@@ -303,29 +511,45 @@ export default async function handler(
           "shop_item",
 
         targetId:
-          result.insertedId.toString(),
+          itemId,
 
         details: {
+
           name:
             cleanName,
 
           price:
             cleanPrice,
 
+          type:
+            cleanType,
+
           active:
-            active !== false
+            active !== false,
+
+          limited:
+            limited === true
+
         }
+
       });
 
 
+      /* ==========================================
+         RESPONSE
+      ========================================== */
+
       return res.status(201).json({
+
         success: true,
 
         item:
           cleanItem(
-            created
+            item
           )
+
       });
+
 
     } catch (error) {
 
@@ -335,9 +559,12 @@ export default async function handler(
       );
 
       return res.status(500).json({
+
         success: false,
+
         error:
           "Failed to create shop item."
+
       });
 
     }
@@ -345,10 +572,17 @@ export default async function handler(
   }
 
 
+  /* ==========================================
+     METHOD NOT ALLOWED
+  ========================================== */
+
   return res.status(405).json({
+
     success: false,
+
     error:
       "Method not allowed."
+
   });
 
 }
