@@ -1,6 +1,9 @@
 import { setCors } from "../../lib/cors.js";
 import { getAuthenticatedUser } from "../../lib/auth.js";
-import { getDb } from "../../lib/mongodb.js";
+import {
+  getDb,
+  getMongoClient
+} from "../../lib/mongodb.js";
 
 export default async function handler(req, res) {
   if (setCors(req, res)) {
@@ -13,6 +16,8 @@ export default async function handler(req, res) {
       error: "Method not allowed"
     });
   }
+
+  let session = null;
 
   try {
     const user =
@@ -40,123 +45,143 @@ export default async function handler(req, res) {
     }
 
     const db = await getDb();
+    const client = getMongoClient();
 
-    const item =
-      await db.collection("shop_items").findOne({
-        _id: itemId,
-        active: true
-      });
+    session = client.startSession();
 
-    if (!item) {
-      return res.status(404).json({
-        success: false,
-        error: "Shop item not found."
-      });
-    }
+    let purchasedItem = null;
+    let newBalance = null;
 
-    if (
-      !Number.isInteger(item.price) ||
-      item.price < 0
-    ) {
-      return res.status(500).json({
-        success: false,
-        error: "Shop item has an invalid price."
-      });
-    }
+    await session.withTransaction(
+      async () => {
 
-    const existing =
-      await db.collection("inventory").findOne({
-        userId: user._id,
-        itemId: item._id
-      });
+        const item =
+          await db.collection("shop_items").findOne(
+            {
+              _id: itemId,
+              active: true
+            },
+            {
+              session
+            }
+          );
 
-    if (existing) {
-      return res.status(409).json({
-        success: false,
-        error: "You already own this item."
-      });
-    }
-
-    const session =
-      db.client?.startSession?.();
-
-    /*
-      MongoClient is exposed through getMongoClient
-      in the existing MongoDB utility. Import it
-      below if transactions are enabled.
-    */
-
-    const result =
-      await db.collection("minigame_users").findOneAndUpdate(
-        {
-          _id: user._id,
-          balance: {
-            $gte: item.price
-          }
-        },
-        {
-          $inc: {
-            balance: -item.price
-          },
-          $set: {
-            updatedAt: new Date()
-          }
-        },
-        {
-          returnDocument: "after"
+        if (!item) {
+          throw new Error(
+            "SHOP_ITEM_NOT_FOUND"
+          );
         }
-      );
 
-    if (!result) {
-      return res.status(400).json({
-        success: false,
-        error: "Insufficient balance."
-      });
-    }
-
-    try {
-
-      await db.collection("inventory").insertOne({
-        userId: user._id,
-        itemId: item._id,
-        name: item.name,
-        type: item.type,
-        purchasedAt: new Date()
-      });
-
-    } catch (inventoryError) {
-
-      /*
-        Refund the balance if inventory creation
-        fails.
-      */
-
-      await db.collection("minigame_users").updateOne(
-        {
-          _id: user._id
-        },
-        {
-          $inc: {
-            balance: item.price
-          },
-          $set: {
-            updatedAt: new Date()
-          }
+        if (
+          !Number.isInteger(item.price) ||
+          item.price < 0
+        ) {
+          throw new Error(
+            "INVALID_SHOP_ITEM"
+          );
         }
-      );
 
-      throw inventoryError;
-    }
+        const inventoryId =
+          `${user._id}:${item._id}`;
+
+        const existing =
+          await db.collection("minigame_inventory")
+            .findOne(
+              {
+                _id: inventoryId
+              },
+              {
+                session
+              }
+            );
+
+        if (existing) {
+          throw new Error(
+            "ITEM_ALREADY_OWNED"
+          );
+        }
+
+        const balanceUpdate =
+          await db
+            .collection("minigame_users")
+            .findOneAndUpdate(
+              {
+                _id: user._id,
+                balance: {
+                  $gte: item.price
+                }
+              },
+              {
+                $inc: {
+                  balance: -item.price
+                },
+                $set: {
+                  updatedAt: new Date()
+                }
+              },
+              {
+                session,
+                returnDocument: "after"
+              }
+            );
+
+        if (!balanceUpdate) {
+          throw new Error(
+            "INSUFFICIENT_BALANCE"
+          );
+        }
+
+        const now = new Date();
+
+        await db
+          .collection("minigame_inventory")
+          .insertOne(
+            {
+              _id: inventoryId,
+              userId: user._id,
+              itemId: item._id,
+              quantity: 1,
+              purchasedAt: now,
+              updatedAt: now
+            },
+            {
+              session
+            }
+          );
+
+        await db
+          .collection("shop_transactions")
+          .insertOne(
+            {
+              userId: user._id,
+              itemId: item._id,
+              itemName: item.name,
+              price: item.price,
+              type: item.type,
+              purchasedAt: now
+            },
+            {
+              session
+            }
+          );
+
+        purchasedItem = {
+          id: item._id,
+          name: item.name,
+          type: item.type,
+          price: item.price
+        };
+
+        newBalance =
+          balanceUpdate.balance;
+      }
+    );
 
     return res.status(200).json({
       success: true,
       message: "Item purchased successfully.",
-      item: {
-        id: item._id,
-        name: item.name,
-        type: item.type
-      },
-      balance: result.balance
+      item: purchasedItem,
+      balance: newBalance
     });
 
   } catch (error) {
@@ -166,9 +191,56 @@ export default async function handler(req, res) {
       error
     );
 
+    if (
+      error.message ===
+      "SHOP_ITEM_NOT_FOUND"
+    ) {
+      return res.status(404).json({
+        success: false,
+        error: "Shop item not found."
+      });
+    }
+
+    if (
+      error.message ===
+      "ITEM_ALREADY_OWNED"
+    ) {
+      return res.status(409).json({
+        success: false,
+        error: "You already own this item."
+      });
+    }
+
+    if (
+      error.message ===
+      "INSUFFICIENT_BALANCE"
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Insufficient balance."
+      });
+    }
+
+    if (
+      error.message ===
+      "INVALID_SHOP_ITEM"
+    ) {
+      return res.status(500).json({
+        success: false,
+        error: "Shop item has an invalid configuration."
+      });
+    }
+
     return res.status(500).json({
       success: false,
       error: "Internal server error"
     });
+
+  } finally {
+
+    if (session) {
+      await session.endSession();
+    }
+
   }
 }
