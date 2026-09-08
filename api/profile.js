@@ -28,41 +28,57 @@ export default async function handler(req, res) {
       });
     }
 
-    const db = await getDb();
+    const db =
+      await getDb();
+
+
+    /* ==========================================
+       FIND USER
+    ========================================== */
 
     const user =
-      await db.collection("users").findOne(
-        {
-          $or: [
-            {
-              username: username
-            },
-            {
-              username: {
-                $regex:
-                  `^${escapeRegex(username)}$`,
-                $options: "i"
+      await db
+        .collection("users")
+        .findOne(
+          {
+            $or: [
+              {
+                username: username
+              },
+              {
+                username: {
+                  $regex:
+                    `^${escapeRegex(username)}$`,
+                  $options: "i"
+                }
               }
+            ]
+          },
+          {
+            projection: {
+              _id: 1,
+              username: 1,
+              discordUsername: 1,
+              avatar: 1,
+              avatarUrl: 1
             }
-          ]
-        },
-        {
-          projection: {
-            _id: 1,
-            username: 1,
-            discordUsername: 1,
-            avatar: 1,
-            avatarUrl: 1
           }
-        }
-      );
+        );
+
 
     if (!user) {
+
       return res.status(404).json({
         success: false,
         error: "User not found."
       });
+
     }
+
+
+    /* ==========================================
+       MINIGAME PROFILE
+    ========================================== */
 
     const minigameUser =
       await db
@@ -71,22 +87,32 @@ export default async function handler(req, res) {
           _id: user._id
         });
 
+
     if (!minigameUser) {
+
       return res.status(404).json({
         success: false,
         error: "Minigame profile not found."
       });
+
     }
 
-    /*
-     * Get public staff information.
-     */
+
+    /* ==========================================
+       STAFF STATUS
+    ========================================== */
+
     const staff =
       await db
         .collection("staff_users")
         .findOne({
           _id: user._id
         });
+
+
+    /* ==========================================
+       PUBLIC PROFILE
+    ========================================== */
 
     return res.status(200).json({
 
@@ -95,7 +121,7 @@ export default async function handler(req, res) {
       profile: {
 
         /*
-         * User identity
+         * Discord identity
          */
         id:
           String(user._id),
@@ -110,8 +136,9 @@ export default async function handler(req, res) {
           user.avatar ||
           null,
 
+
         /*
-         * Profile equipment
+         * Profile cosmetics
          */
         equippedNameplate:
           minigameUser.equippedNameplate ||
@@ -128,6 +155,7 @@ export default async function handler(req, res) {
         equippedTheme:
           minigameUser.equippedTheme ||
           null,
+
 
         /*
          * Economy
@@ -152,6 +180,7 @@ export default async function handler(req, res) {
             minigameUser.totalLost || 0
           ),
 
+
         /*
          * Game statistics
          */
@@ -175,8 +204,9 @@ export default async function handler(req, res) {
             minigameUser.chessRating || 1200
           ),
 
+
         /*
-         * Public staff badge
+         * Public staff information
          */
         staff:
           staff
@@ -189,6 +219,7 @@ export default async function handler(req, res) {
       }
 
     });
+
 
   } catch (error) {
 
@@ -205,6 +236,11 @@ export default async function handler(req, res) {
   }
 
 }
+
+
+/* ==========================================
+   ESCAPE REGEX
+========================================== */
 
 function escapeRegex(value) {
 
