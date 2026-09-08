@@ -30,13 +30,6 @@ export default async function handler(req, res) {
 
     const db = await getDb();
 
-    /*
-     * Find the Memplace user.
-     *
-     * We check both username fields because
-     * your existing users may use either one.
-     */
-
     const user =
       await db.collection("users").findOne(
         {
@@ -71,10 +64,6 @@ export default async function handler(req, res) {
       });
     }
 
-    /*
-     * Find the user's minigame profile.
-     */
-
     const minigameUser =
       await db
         .collection("minigame_users")
@@ -90,15 +79,26 @@ export default async function handler(req, res) {
     }
 
     /*
-     * Return ONLY information that is safe
-     * for a public profile.
+     * Get public staff information.
      */
+    const staff =
+      await db
+        .collection("staff_users")
+        .findOne({
+          _id: user._id
+        });
 
     return res.status(200).json({
 
       success: true,
 
       profile: {
+
+        /*
+         * User identity
+         */
+        id:
+          String(user._id),
 
         username:
           user.username ||
@@ -110,6 +110,9 @@ export default async function handler(req, res) {
           user.avatar ||
           null,
 
+        /*
+         * Profile equipment
+         */
         equippedNameplate:
           minigameUser.equippedNameplate ||
           null,
@@ -126,30 +129,62 @@ export default async function handler(req, res) {
           minigameUser.equippedTheme ||
           null,
 
+        /*
+         * Economy
+         */
         balance:
           Number(
             minigameUser.balance || 0
           ),
 
+        totalWagered:
+          Number(
+            minigameUser.totalWagered || 0
+          ),
+
+        totalWon:
+          Number(
+            minigameUser.totalWon || 0
+          ),
+
+        totalLost:
+          Number(
+            minigameUser.totalLost || 0
+          ),
+
+        /*
+         * Game statistics
+         */
         gamesPlayed:
           Number(
             minigameUser.gamesPlayed || 0
           ),
 
-        wins:
+        gamesWon:
           Number(
-            minigameUser.wins || 0
+            minigameUser.gamesWon || 0
           ),
 
-        losses:
+        gamesLost:
           Number(
-            minigameUser.losses || 0
+            minigameUser.gamesLost || 0
           ),
 
         chessRating:
           Number(
-            minigameUser.chessRating || 0
-          )
+            minigameUser.chessRating || 1200
+          ),
+
+        /*
+         * Public staff badge
+         */
+        staff:
+          staff
+            ? {
+                role:
+                  staff.role || null
+              }
+            : null
 
       }
 
@@ -170,7 +205,6 @@ export default async function handler(req, res) {
   }
 
 }
-
 
 function escapeRegex(value) {
 
