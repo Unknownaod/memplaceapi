@@ -11,10 +11,12 @@ export default async function handler(req, res) {
 
 
   if (req.method !== "GET") {
+
     return res.status(405).json({
       success: false,
       error: "Method not allowed"
     });
+
   }
 
 
@@ -35,6 +37,7 @@ export default async function handler(req, res) {
         authenticated: false,
         user: null
       });
+
     }
 
 
@@ -55,9 +58,11 @@ export default async function handler(req, res) {
     ========================================== */
 
     let minigameUser =
-      await db.collection("minigame_users").findOne({
-        _id: user._id
-      });
+      await db
+        .collection("minigame_users")
+        .findOne({
+          _id: user._id
+        });
 
 
     /* ==========================================
@@ -95,41 +100,61 @@ export default async function handler(req, res) {
         chessRating:
           1200,
 
-        /*
-         * Shop cosmetics
-         */
+
+        /* ==========================================
+           SHOP EQUIPMENT
+        ========================================== */
+
         equippedNameplate:
           null,
 
         equippedBadge:
           null,
 
-        /*
-         * Profile theme
-         */
+        equippedTitle:
+          null,
+
+
+        /* ==========================================
+           PROFILE THEME
+        ========================================== */
+
         equippedTheme:
           null,
+
 
         createdAt:
           now,
 
         updatedAt:
           now
+
       };
 
 
       await db
         .collection("minigame_users")
-        .insertOne(minigameUser);
+        .insertOne(
+          minigameUser
+        );
+
 
     } else {
 
-      /*
-       * Make sure older accounts have
-       * the new theme field.
-       */
+
+      /* ==========================================
+         MIGRATE OLDER ACCOUNTS
+         
+         Adds newly introduced equipment fields
+         without overwriting existing equipment.
+      ========================================== */
 
       const updates = {};
+
+
+      /* ------------------------------------------
+         NAMEPLATE
+      ------------------------------------------ */
 
       if (
         !Object.prototype.hasOwnProperty.call(
@@ -137,8 +162,16 @@ export default async function handler(req, res) {
           "equippedNameplate"
         )
       ) {
-        updates.equippedNameplate = null;
+
+        updates.equippedNameplate =
+          null;
+
       }
+
+
+      /* ------------------------------------------
+         BADGE
+      ------------------------------------------ */
 
       if (
         !Object.prototype.hasOwnProperty.call(
@@ -146,8 +179,33 @@ export default async function handler(req, res) {
           "equippedBadge"
         )
       ) {
-        updates.equippedBadge = null;
+
+        updates.equippedBadge =
+          null;
+
       }
+
+
+      /* ------------------------------------------
+         TITLE
+      ------------------------------------------ */
+
+      if (
+        !Object.prototype.hasOwnProperty.call(
+          minigameUser,
+          "equippedTitle"
+        )
+      ) {
+
+        updates.equippedTitle =
+          null;
+
+      }
+
+
+      /* ------------------------------------------
+         PROFILE THEME
+      ------------------------------------------ */
 
       if (
         !Object.prototype.hasOwnProperty.call(
@@ -155,30 +213,50 @@ export default async function handler(req, res) {
           "equippedTheme"
         )
       ) {
-        updates.equippedTheme = null;
+
+        updates.equippedTheme =
+          null;
+
       }
+
+
+      /* ==========================================
+         APPLY MIGRATION
+      ========================================== */
 
       if (
         Object.keys(updates).length > 0
       ) {
 
-        updates.updatedAt = now;
+        updates.updatedAt =
+          now;
+
 
         await db
           .collection("minigame_users")
           .updateOne(
+
             {
-              _id: user._id
+              _id:
+                user._id
             },
+
             {
-              $set: updates
+              $set:
+                updates
             }
+
           );
 
+
         minigameUser = {
+
           ...minigameUser,
+
           ...updates
+
         };
+
       }
 
     }
@@ -190,9 +268,12 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
 
-      success: true,
+      success:
+        true,
 
-      authenticated: true,
+      authenticated:
+        true,
+
 
       user: {
 
@@ -208,8 +289,18 @@ export default async function handler(req, res) {
         avatar:
           user.avatar,
 
+
+        /* ==========================================
+           ECONOMY
+        ========================================== */
+
         balance:
           minigameUser.balance,
+
+
+        /* ==========================================
+           GAME STATS
+        ========================================== */
 
         gamesPlayed:
           minigameUser.gamesPlayed,
@@ -229,22 +320,42 @@ export default async function handler(req, res) {
         totalLost:
           minigameUser.totalLost,
 
+
+        /* ==========================================
+           CHESS
+        ========================================== */
+
         chessRating:
           minigameUser.chessRating,
 
-        /*
-         * Equipped cosmetics
-         */
+
+        /* ==========================================
+           EQUIPPED COSMETICS
+        ========================================== */
 
         equippedNameplate:
-          minigameUser.equippedNameplate || null,
+          minigameUser.equippedNameplate ||
+          null,
 
         equippedBadge:
-          minigameUser.equippedBadge || null,
+          minigameUser.equippedBadge ||
+          null,
+
+        equippedTitle:
+          minigameUser.equippedTitle ||
+          null,
+
+
+        /* ==========================================
+           PROFILE THEME
+        ========================================== */
 
         equippedTheme:
-          minigameUser.equippedTheme || null
+          minigameUser.equippedTheme ||
+          null
+
       }
+
     });
 
 
@@ -255,9 +366,17 @@ export default async function handler(req, res) {
       error
     );
 
+
     return res.status(500).json({
-      success: false,
-      error: "Internal server error"
+
+      success:
+        false,
+
+      error:
+        "Internal server error"
+
     });
+
   }
+
 }
