@@ -42,6 +42,10 @@ export default async function handler(req, res) {
     }
 
 
+    /* ==========================================
+       DISCORD CONFIG
+    ========================================== */
+
     const clientId =
       process.env.DISCORD_CLIENT_ID;
 
@@ -104,7 +108,8 @@ export default async function handler(req, res) {
 
       return res.status(500).json({
         success: false,
-        error: "Failed to authenticate with Discord"
+        error: "Failed to authenticate with Discord",
+        details: tokenError
       });
     }
 
@@ -131,9 +136,18 @@ export default async function handler(req, res) {
 
     if (!discordResponse.ok) {
 
+      const discordError =
+        await discordResponse.text();
+
+      console.error(
+        "DISCORD USER ERROR:",
+        discordError
+      );
+
       return res.status(500).json({
         success: false,
-        error: "Failed to retrieve Discord user"
+        error: "Failed to retrieve Discord user",
+        details: discordError
       });
     }
 
@@ -176,7 +190,9 @@ export default async function handler(req, res) {
         },
         {
           $set: {
-            username: discordUser.username,
+
+            username:
+              discordUser.username,
 
             discordUsername:
               discordUser.username,
@@ -184,7 +200,8 @@ export default async function handler(req, res) {
             avatar:
               discordUser.avatar,
 
-            updatedAt: now
+            updatedAt:
+              now
           }
         }
       );
@@ -193,7 +210,8 @@ export default async function handler(req, res) {
 
       await db.collection("users").insertOne({
 
-        _id: discordUser.id,
+        _id:
+          discordUser.id,
 
         username:
           discordUser.username,
@@ -204,9 +222,11 @@ export default async function handler(req, res) {
         avatar:
           discordUser.avatar,
 
-        createdAt: now,
+        createdAt:
+          now,
 
-        updatedAt: now
+        updatedAt:
+          now
       });
     }
 
@@ -228,33 +248,35 @@ export default async function handler(req, res) {
 
     await db.collection("sessions").insertOne({
 
-      _id: sessionId,
+      _id:
+        sessionId,
 
       userId:
         discordUser.id,
 
-      createdAt: now,
+      createdAt:
+        now,
 
       expiresAt
     });
 
 
-/* ==========================================
-   SET SESSION COOKIE
-========================================== */
+    /* ==========================================
+       SET SESSION COOKIE
+    ========================================== */
 
-res.setHeader(
-  "Set-Cookie",
-  [
-    `mem_session=${encodeURIComponent(sessionId)}`,
-    "Domain=.memplace.xyz",
-    "Path=/",
-    "HttpOnly",
-    "Secure",
-    "SameSite=Lax",
-    "Max-Age=2592000"
-  ].join("; ")
-);
+    res.setHeader(
+      "Set-Cookie",
+      [
+        `mem_session=${encodeURIComponent(sessionId)}`,
+        "Domain=.memplace.xyz",
+        "Path=/",
+        "HttpOnly",
+        "Secure",
+        "SameSite=Lax",
+        "Max-Age=2592000"
+      ].join("; ")
+    );
 
 
     /* ==========================================
@@ -265,6 +287,7 @@ res.setHeader(
       "https://minigames.memplace.xyz/?discord=connected"
     );
 
+
   } catch (error) {
 
     console.error(
@@ -274,7 +297,10 @@ res.setHeader(
 
     return res.status(500).json({
       success: false,
-      error: "Authentication failed"
+      error: "Authentication failed",
+      details:
+        error?.message ||
+        String(error)
     });
   }
 }
