@@ -7,10 +7,11 @@
     "start": "node server.js",
     "dev": "vercel dev"
   },
-  "dependencies": {
-    "express": "^5.1.0",
-    "mongodb": "^6.19.0"
-  },
+"dependencies": {
+  "chess.js": "^1.4.0",
+  "express": "^5.1.0",
+  "mongodb": "^6.19.0"
+},
   "devDependencies": {
     "vercel": "^48.0.0"
   }
