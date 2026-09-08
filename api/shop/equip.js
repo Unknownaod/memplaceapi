@@ -9,8 +9,47 @@ import { getDb } from "../../lib/mongodb.js";
 
 const EQUIPMENT_TYPES = new Set([
   "profile_cosmetic",
-  "profile_badge"
+  "profile_badge",
+  "profile_theme"
 ]);
+
+
+/* ==========================================
+   GET EQUIPMENT FIELD
+========================================== */
+
+function getEquipmentField(type) {
+
+  if (
+    type === "profile_cosmetic"
+  ) {
+
+    return "equippedNameplate";
+
+  }
+
+
+  if (
+    type === "profile_badge"
+  ) {
+
+    return "equippedBadge";
+
+  }
+
+
+  if (
+    type === "profile_theme"
+  ) {
+
+    return "equippedTheme";
+
+  }
+
+
+  return null;
+
+}
 
 
 /* ==========================================
@@ -88,7 +127,8 @@ export default async function handler(req, res) {
 
       return res.status(400).json({
         success: false,
-        error: "Action must be equip or unequip",
+        error:
+          "Action must be equip or unequip",
         code: "INVALID_ACTION"
       });
 
@@ -146,9 +186,31 @@ export default async function handler(req, res) {
 
 
     /* ==========================================
+       DETERMINE EQUIPMENT SLOT
+    ========================================== */
+
+    const equipmentField =
+      getEquipmentField(
+        item.type
+      );
+
+
+    if (!equipmentField) {
+
+      return res.status(400).json({
+        success: false,
+        error:
+          "This item has no valid equipment slot",
+        code: "INVALID_EQUIPMENT_SLOT"
+      });
+
+    }
+
+
+    /* ==========================================
        CHECK OWNERSHIP
-       
-       We require ownership for BOTH
+
+       Ownership is required for BOTH
        equip and unequip.
     ========================================== */
 
@@ -171,35 +233,10 @@ export default async function handler(req, res) {
 
       return res.status(403).json({
         success: false,
-        error: "You do not own this item",
+        error:
+          "You do not own this item",
         code: "ITEM_NOT_OWNED"
       });
-
-    }
-
-
-    /* ==========================================
-       DETERMINE EQUIPMENT SLOT
-    ========================================== */
-
-    let equipmentField;
-
-
-    if (
-      item.type ===
-      "profile_cosmetic"
-    ) {
-
-      equipmentField =
-        "equippedNameplate";
-
-    } else if (
-      item.type ===
-      "profile_badge"
-    ) {
-
-      equipmentField =
-        "equippedBadge";
 
     }
 
@@ -239,7 +276,8 @@ export default async function handler(req, res) {
 
         return res.status(404).json({
           success: false,
-          error: "Minigame account not found"
+          error:
+            "Minigame account not found"
         });
 
       }
@@ -249,9 +287,11 @@ export default async function handler(req, res) {
 
         success: true,
 
-        action: "equip",
+        action:
+          "equip",
 
         equipped: {
+
           itemId:
             item._id,
 
@@ -262,10 +302,12 @@ export default async function handler(req, res) {
             item.type,
 
           icon:
-            item.icon,
+            item.icon ||
+            "✦",
 
           slot:
             equipmentField
+
         },
 
         equipment: {
@@ -280,7 +322,14 @@ export default async function handler(req, res) {
             equipmentField ===
             "equippedBadge"
               ? item._id
+              : null,
+
+          equippedTheme:
+            equipmentField ===
+            "equippedTheme"
+              ? item._id
               : null
+
         }
 
       });
@@ -322,24 +371,28 @@ export default async function handler(req, res) {
 
       return res.status(400).json({
         success: false,
-        error: "This item is not currently equipped",
-        code: "ITEM_NOT_EQUIPPED"
+        error:
+          "This item is not currently equipped",
+        code:
+          "ITEM_NOT_EQUIPPED"
       });
 
     }
 
 
     /* ==========================================
-       RESPONSE
+       UNEQUIP RESPONSE
     ========================================== */
 
     return res.status(200).json({
 
       success: true,
 
-      action: "unequip",
+      action:
+        "unequip",
 
       unequipped: {
+
         itemId:
           item._id,
 
@@ -350,10 +403,12 @@ export default async function handler(req, res) {
           item.type,
 
         icon:
-          item.icon,
+          item.icon ||
+          "✦",
 
         slot:
           equipmentField
+
       },
 
       equipment: {
@@ -368,7 +423,14 @@ export default async function handler(req, res) {
           equipmentField ===
           "equippedBadge"
             ? null
+            : undefined,
+
+        equippedTheme:
+          equipmentField ===
+          "equippedTheme"
+            ? null
             : undefined
+
       }
 
     });
@@ -381,9 +443,11 @@ export default async function handler(req, res) {
       error
     );
 
+
     return res.status(500).json({
       success: false,
-      error: "Internal server error"
+      error:
+        "Internal server error"
     });
 
   }
