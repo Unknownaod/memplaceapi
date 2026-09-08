@@ -10,16 +10,18 @@ import { getDb } from "../../lib/mongodb.js";
 const EQUIPMENT_TYPES = new Set([
   "profile_cosmetic",
   "profile_badge",
-  "profile_theme"
+  "profile_theme",
+  "profile_title"
 ]);
 
 
 /* ==========================================
    PROFILE TITLE ITEMS
+==========================================
 
-   These are profile_cosmetic items,
-   but use the title equipment slot instead
-   of the nameplate slot.
+   Supports older shop items where a title
+   was accidentally created as profile_cosmetic.
+
 ========================================== */
 
 const PROFILE_TITLE_ITEMS = new Set([
@@ -35,11 +37,28 @@ function getEquipmentField(item) {
 
   /* ------------------------------------------
      PROFILE TITLE
+
+     New correct type:
+       profile_title
+
+     Older title items:
+       profile_cosmetic + legendary-title
   ------------------------------------------ */
 
   if (
+    item.type === "profile_title"
+  ) {
+
+    return "equippedTitle";
+
+  }
+
+
+  if (
     item.type === "profile_cosmetic" &&
-    PROFILE_TITLE_ITEMS.has(item._id)
+    PROFILE_TITLE_ITEMS.has(
+      String(item._id)
+    )
   ) {
 
     return "equippedTitle";
@@ -93,47 +112,52 @@ function getEquipmentField(item) {
 
 /* ==========================================
    GET EQUIPMENT STATE
+
+   Returns the ACTUAL current equipment
+   from the database instead of assuming
+   unrelated slots are null.
 ========================================== */
 
-function buildEquipmentState(
-  equipmentField,
-  itemId,
-  equipped
+async function getCurrentEquipment(
+  db,
+  userId
 ) {
+
+  const minigameUser =
+    await db
+      .collection("minigame_users")
+      .findOne(
+        {
+          _id: userId
+        },
+        {
+          projection: {
+            equippedNameplate: 1,
+            equippedBadge: 1,
+            equippedTheme: 1,
+            equippedTitle: 1
+          }
+        }
+      );
+
 
   return {
 
     equippedNameplate:
-      equipmentField ===
-      "equippedNameplate"
-        ? equipped
-          ? itemId
-          : null
-        : undefined,
+      minigameUser?.equippedNameplate ||
+      null,
 
     equippedBadge:
-      equipmentField ===
-      "equippedBadge"
-        ? equipped
-          ? itemId
-          : null
-        : undefined,
+      minigameUser?.equippedBadge ||
+      null,
 
     equippedTheme:
-      equipmentField ===
-      "equippedTheme"
-        ? equipped
-          ? itemId
-          : null
-        : undefined,
+      minigameUser?.equippedTheme ||
+      null,
 
     equippedTitle:
-      equipmentField ===
-      "equippedTitle"
-        ? equipped
-          ? itemId
-          : null
-        : undefined
+      minigameUser?.equippedTitle ||
+      null
 
   };
 
@@ -144,9 +168,14 @@ function buildEquipmentState(
    HANDLER
 ========================================== */
 
-export default async function handler(req, res) {
+export default async function handler(
+  req,
+  res
+) {
 
-  if (setCors(req, res)) {
+  if (
+    setCors(req, res)
+  ) {
     return;
   }
 
@@ -155,11 +184,17 @@ export default async function handler(req, res) {
      METHOD
   ========================================== */
 
-  if (req.method !== "POST") {
+  if (
+    req.method !== "POST"
+  ) {
 
     return res.status(405).json({
+
       success: false,
-      error: "Method not allowed"
+
+      error:
+        "Method not allowed"
+
     });
 
   }
@@ -178,8 +213,12 @@ export default async function handler(req, res) {
     if (!user) {
 
       return res.status(401).json({
+
         success: false,
-        error: "Authentication required"
+
+        error:
+          "Authentication required"
+
       });
 
     }
@@ -191,8 +230,27 @@ export default async function handler(req, res) {
 
     const itemId =
       typeof req.body?.itemId === "string"
+
         ? req.body.itemId.trim()
+
         : "";
+
+
+    if (!itemId) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        error:
+          "Item ID is required",
+
+        code:
+          "INVALID_SHOP_ITEM"
+
+      });
+
+    }
 
 
     /* ==========================================
@@ -201,19 +259,12 @@ export default async function handler(req, res) {
 
     const action =
       typeof req.body?.action === "string"
-        ? req.body.action.trim().toLowerCase()
+
+        ? req.body.action
+            .trim()
+            .toLowerCase()
+
         : "equip";
-
-
-    if (!itemId) {
-
-      return res.status(400).json({
-        success: false,
-        error: "Item ID is required",
-        code: "INVALID_SHOP_ITEM"
-      });
-
-    }
 
 
     if (
@@ -222,10 +273,15 @@ export default async function handler(req, res) {
     ) {
 
       return res.status(400).json({
+
         success: false,
+
         error:
           "Action must be equip or unequip",
-        code: "INVALID_ACTION"
+
+        code:
+          "INVALID_ACTION"
+
       });
 
     }
@@ -247,16 +303,25 @@ export default async function handler(req, res) {
       await db
         .collection("shop_items")
         .findOne({
-          _id: itemId
+
+          _id:
+            itemId
+
         });
 
 
     if (!item) {
 
       return res.status(404).json({
+
         success: false,
-        error: "Shop item not found",
-        code: "SHOP_ITEM_NOT_FOUND"
+
+        error:
+          "Shop item not found",
+
+        code:
+          "SHOP_ITEM_NOT_FOUND"
+
       });
 
     }
@@ -273,11 +338,15 @@ export default async function handler(req, res) {
     ) {
 
       return res.status(400).json({
+
         success: false,
+
         error:
           "This item cannot be equipped",
+
         code:
           "ITEM_NOT_EQUIPPABLE"
+
       });
 
     }
@@ -294,11 +363,15 @@ export default async function handler(req, res) {
     if (!equipmentField) {
 
       return res.status(400).json({
+
         success: false,
+
         error:
           "This item has no valid equipment slot",
+
         code:
           "INVALID_EQUIPMENT_SLOT"
+
       });
 
     }
@@ -331,11 +404,15 @@ export default async function handler(req, res) {
     if (!inventory) {
 
       return res.status(403).json({
+
         success: false,
+
         error:
           "You do not own this item",
+
         code:
           "ITEM_NOT_OWNED"
+
       });
 
     }
@@ -369,26 +446,45 @@ export default async function handler(req, res) {
                   new Date()
 
               }
+
             }
 
           );
 
+
+      /* ==========================================
+         CHECK ACCOUNT
+      ========================================== */
 
       if (
         result.matchedCount === 0
       ) {
 
         return res.status(404).json({
+
           success: false,
+
           error:
             "Minigame account not found"
+
         });
 
       }
 
 
       /* ==========================================
-         EQUIPMENT RESPONSE
+         GET REAL CURRENT EQUIPMENT
+      ========================================== */
+
+      const equipment =
+        await getCurrentEquipment(
+          db,
+          user._id
+        );
+
+
+      /* ==========================================
+         RESPONSE
       ========================================== */
 
       return res.status(200).json({
@@ -418,12 +514,7 @@ export default async function handler(req, res) {
 
         },
 
-        equipment:
-          buildEquipmentState(
-            equipmentField,
-            item._id,
-            true
-          )
+        equipment
 
       });
 
@@ -490,7 +581,18 @@ export default async function handler(req, res) {
 
 
     /* ==========================================
-       UNEQUIP RESPONSE
+       GET REAL CURRENT EQUIPMENT
+    ========================================== */
+
+    const equipment =
+      await getCurrentEquipment(
+        db,
+        user._id
+      );
+
+
+    /* ==========================================
+       RESPONSE
     ========================================== */
 
     return res.status(200).json({
@@ -520,12 +622,7 @@ export default async function handler(req, res) {
 
       },
 
-      equipment:
-        buildEquipmentState(
-          equipmentField,
-          item._id,
-          false
-        )
+      equipment
 
     });
 
