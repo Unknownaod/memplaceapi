@@ -1,3 +1,4 @@
+js
 import { setCors } from "../../lib/cors.js";
 import { getAuthenticatedUser } from "../../lib/auth.js";
 import {
@@ -50,10 +51,17 @@ export default async function handler(req, res) {
     session = client.startSession();
 
     let purchasedItem = null;
+    let purchasedItems = [];
     let newBalance = null;
 
     await session.withTransaction(
       async () => {
+
+        /*
+        ==========================================
+        FIND SHOP ITEM
+        ==========================================
+        */
 
         const item =
           await db.collection("shop_items").findOne(
@@ -72,6 +80,12 @@ export default async function handler(req, res) {
           );
         }
 
+        /*
+        ==========================================
+        VALIDATE PRICE
+        ==========================================
+        */
+
         if (
           !Number.isInteger(item.price) ||
           item.price < 0
@@ -81,25 +95,119 @@ export default async function handler(req, res) {
           );
         }
 
-        const inventoryId =
-          `${user._id}:${item._id}`;
+        /*
+        ==========================================
+        DETERMINE ITEMS BEING PURCHASED
+        ==========================================
+        */
 
-        const existing =
-          await db.collection("minigame_inventory")
-            .findOne(
+        let itemIds = [];
+
+        if (item.type === "bundle") {
+
+          if (
+            !Array.isArray(item.items) ||
+            item.items.length === 0
+          ) {
+            throw new Error(
+              "INVALID_SHOP_BUNDLE"
+            );
+          }
+
+          itemIds = [
+            ...new Set(
+              item.items
+                .filter(
+                  id =>
+                    typeof id === "string" &&
+                    id.trim()
+                )
+            )
+          ];
+
+          if (itemIds.length === 0) {
+            throw new Error(
+              "INVALID_SHOP_BUNDLE"
+            );
+          }
+
+        } else {
+
+          itemIds = [
+            item._id
+          ];
+
+        }
+
+        /*
+        ==========================================
+        FIND INCLUDED SHOP ITEMS
+        ==========================================
+        */
+
+        const includedItems =
+          await db
+            .collection("shop_items")
+            .find(
               {
-                _id: inventoryId
+                _id: {
+                  $in: itemIds
+                },
+                active: true
               },
               {
                 session
               }
-            );
+            )
+            .toArray();
 
-        if (existing) {
+        if (
+          includedItems.length !==
+          itemIds.length
+        ) {
+          throw new Error(
+            "INVALID_SHOP_BUNDLE"
+          );
+        }
+
+        /*
+        ==========================================
+        CHECK OWNERSHIP
+        ==========================================
+        */
+
+        const inventoryIds =
+          itemIds.map(
+            id =>
+              `${user._id}:${id}`
+          );
+
+        const existingItems =
+          await db
+            .collection("minigame_inventory")
+            .find(
+              {
+                _id: {
+                  $in: inventoryIds
+                }
+              },
+              {
+                session
+              }
+            )
+            .toArray();
+
+        if (existingItems.length > 0) {
           throw new Error(
             "ITEM_ALREADY_OWNED"
           );
         }
+
+        /*
+        ==========================================
+        REMOVE BALANCE
+        ==========================================
+        */
 
         const balanceUpdate =
           await db
@@ -131,45 +239,122 @@ export default async function handler(req, res) {
           );
         }
 
+        /*
+        ==========================================
+        ADD ITEMS TO INVENTORY
+        ==========================================
+        */
+
         const now = new Date();
+
+        const inventoryDocuments =
+          includedItems.map(
+            includedItem => ({
+              _id:
+                `${user._id}:${includedItem._id}`,
+
+              userId:
+                user._id,
+
+              itemId:
+                includedItem._id,
+
+              quantity: 1,
+
+              purchasedAt: now,
+
+              updatedAt: now
+            })
+          );
 
         await db
           .collection("minigame_inventory")
-          .insertOne(
-            {
-              _id: inventoryId,
-              userId: user._id,
-              itemId: item._id,
-              quantity: 1,
-              purchasedAt: now,
-              updatedAt: now
-            },
+          .insertMany(
+            inventoryDocuments,
             {
               session
             }
           );
+
+        /*
+        ==========================================
+        TRANSACTION RECORD
+        ==========================================
+        */
 
         await db
           .collection("shop_transactions")
           .insertOne(
             {
-              userId: user._id,
-              itemId: item._id,
-              itemName: item.name,
-              price: item.price,
-              type: item.type,
-              purchasedAt: now
+              userId:
+                user._id,
+
+              itemId:
+                item._id,
+
+              itemName:
+                item.name,
+
+              price:
+                item.price,
+
+              type:
+                item.type,
+
+              purchasedItems:
+                includedItems.map(
+                  includedItem => ({
+                    id:
+                      includedItem._id,
+
+                    name:
+                      includedItem.name,
+
+                    type:
+                      includedItem.type
+                  })
+                ),
+
+              purchasedAt:
+                now
             },
             {
               session
             }
           );
 
+        /*
+        ==========================================
+        RESPONSE DATA
+        ==========================================
+        */
+
+        purchasedItems =
+          includedItems.map(
+            includedItem => ({
+              id:
+                includedItem._id,
+
+              name:
+                includedItem.name,
+
+              type:
+                includedItem.type
+            })
+          );
+
         purchasedItem = {
-          id: item._id,
-          name: item.name,
-          type: item.type,
-          price: item.price
+          id:
+            item._id,
+
+          name:
+            item.name,
+
+          type:
+            item.type,
+
+          price:
+            item.price
         };
 
         newBalance =
@@ -179,9 +364,21 @@ export default async function handler(req, res) {
 
     return res.status(200).json({
       success: true,
-      message: "Item purchased successfully.",
-      item: purchasedItem,
-      balance: newBalance
+
+      message:
+        itemId === purchasedItem?.id &&
+        purchasedItem?.type === "bundle"
+          ? "Bundle purchased successfully."
+          : "Item purchased successfully.",
+
+      item:
+        purchasedItem,
+
+      purchasedItems:
+        purchasedItems,
+
+      balance:
+        newBalance
     });
 
   } catch (error) {
@@ -197,7 +394,8 @@ export default async function handler(req, res) {
     ) {
       return res.status(404).json({
         success: false,
-        error: "Shop item not found."
+        error:
+          "Shop item not found."
       });
     }
 
@@ -207,7 +405,8 @@ export default async function handler(req, res) {
     ) {
       return res.status(409).json({
         success: false,
-        error: "You already own this item."
+        error:
+          "You already own one or more items in this purchase."
       });
     }
 
@@ -217,7 +416,8 @@ export default async function handler(req, res) {
     ) {
       return res.status(400).json({
         success: false,
-        error: "Insufficient balance."
+        error:
+          "Insufficient balance."
       });
     }
 
@@ -227,13 +427,26 @@ export default async function handler(req, res) {
     ) {
       return res.status(500).json({
         success: false,
-        error: "Shop item has an invalid configuration."
+        error:
+          "Shop item has an invalid configuration."
+      });
+    }
+
+    if (
+      error.message ===
+      "INVALID_SHOP_BUNDLE"
+    ) {
+      return res.status(500).json({
+        success: false,
+        error:
+          "Shop bundle has an invalid configuration."
       });
     }
 
     return res.status(500).json({
       success: false,
-      error: "Internal server error"
+      error:
+        "Internal server error"
     });
 
   } finally {
@@ -244,3 +457,4 @@ export default async function handler(req, res) {
 
   }
 }
+
