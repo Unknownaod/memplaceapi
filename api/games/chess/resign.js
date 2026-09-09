@@ -12,7 +12,7 @@ import {
 
 /*
 ==========================================
-RESIGN CHESS GAME
+RESIGN / END CHESS GAME
 ==========================================
 */
 
@@ -118,19 +118,6 @@ export default async function handler(req, res) {
 
           /*
           ==========================================
-          GAME MUST BE ACTIVE
-          ==========================================
-          */
-
-          if (game.status !== "active") {
-            throw new Error(
-              "GAME_NOT_ACTIVE"
-            );
-          }
-
-
-          /*
-          ==========================================
           VERIFY PLAYER
           ==========================================
           */
@@ -148,6 +135,216 @@ export default async function handler(req, res) {
           if (!playerColor) {
             throw new Error(
               "NOT_A_PLAYER"
+            );
+          }
+
+
+          /*
+          ==========================================
+          WAITING GAME
+          ==========================================
+          
+          If there is no opponent yet, this is
+          simply an open/waiting game.
+
+          Do NOT:
+          - calculate ratings
+          - pay a winner
+          - count a loss
+          - require a black player
+          - award the pot
+
+          The creator is just cancelling their
+          waiting game.
+          ==========================================
+          */
+
+          const hasOpponent =
+            !!game.blackId;
+
+
+          if (
+            game.status === "waiting" &&
+            !hasOpponent
+          ) {
+
+            const updateResult =
+              await db
+                .collection("chess_games")
+                .updateOne(
+                  {
+                    _id: gameId,
+                    status: "waiting",
+                    whiteId: user._id,
+                    $or: [
+                      {
+                        blackId: {
+                          $exists: false
+                        }
+                      },
+                      {
+                        blackId: null
+                      },
+                      {
+                        blackId: ""
+                      }
+                    ]
+                  },
+
+                  {
+                    $set: {
+
+                      status: "completed",
+
+                      winnerId: null,
+
+                      loserId: null,
+
+                      result:
+                        "cancelled",
+
+                      updatedAt:
+                        new Date(),
+
+                      settledAt:
+                        new Date(),
+
+                      pot: 0
+
+                    }
+                  },
+
+                  {
+                    session
+                  }
+                );
+
+
+            /*
+            ==========================================
+            PROTECT AGAINST DOUBLE END
+            ==========================================
+            */
+
+            if (
+              updateResult.modifiedCount !== 1
+            ) {
+              throw new Error(
+                "GAME_ALREADY_SETTLED"
+              );
+            }
+
+
+            /*
+            ==========================================
+            RELEASE / REFUND WAGER
+            ==========================================
+            
+            The waiting game never had an opponent,
+            so the creator should get their wager
+            back if the wager was already deducted
+            when the game was created.
+            ==========================================
+            */
+
+            const wager =
+              Number(game.wager) || 0;
+
+
+            if (wager > 0) {
+
+              await db
+                .collection("minigame_users")
+                .updateOne(
+                  {
+                    _id: user._id
+                  },
+
+                  {
+                    $inc: {
+                      balance: wager
+                    },
+
+                    $set: {
+                      updatedAt:
+                        new Date()
+                    }
+                  },
+
+                  {
+                    session
+                  }
+                );
+
+            }
+
+
+            /*
+            ==========================================
+            RESPONSE
+            ==========================================
+            */
+
+            response = {
+
+              success: true,
+
+              game: "chess",
+
+              gameId,
+
+              status: "completed",
+
+              color: playerColor,
+
+              resigned: true,
+
+              cancelled: true,
+
+              winner: null,
+
+              winnerId: null,
+
+              loserId: null,
+
+              result: "cancelled",
+
+              pot: 0,
+
+              payout: wager,
+
+              refunded: wager
+
+            };
+
+
+            return;
+
+          }
+
+
+          /*
+          ==========================================
+          GAME MUST BE ACTIVE
+          ==========================================
+          */
+
+          if (game.status !== "active") {
+            throw new Error(
+              "GAME_NOT_ACTIVE"
+            );
+          }
+
+
+          /*
+          ==========================================
+          ACTIVE GAME MUST HAVE OPPONENT
+          ==========================================
+          */
+
+          if (!game.whiteId || !game.blackId) {
+            throw new Error(
+              "INVALID_ACTIVE_GAME"
             );
           }
 
@@ -233,7 +430,7 @@ export default async function handler(req, res) {
           */
 
           const pot =
-            game.wager * 2;
+            (Number(game.wager) || 0) * 2;
 
 
           /*
@@ -521,6 +718,18 @@ export default async function handler(req, res) {
           success: false,
           error:
             "This chess game has already been settled."
+        });
+      }
+
+
+      if (
+        error.message ===
+        "INVALID_ACTIVE_GAME"
+      ) {
+        return res.status(409).json({
+          success: false,
+          error:
+            "This chess game does not have two players."
         });
       }
 
