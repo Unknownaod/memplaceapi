@@ -269,7 +269,6 @@ export default async function handler(req, res) {
       "Set-Cookie",
       [
         `mem_session=${encodeURIComponent(sessionId)}`,
-        "Domain=.memplace.xyz",
         "Path=/",
         "HttpOnly",
         "Secure",
