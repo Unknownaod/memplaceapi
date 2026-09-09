@@ -1,4 +1,3 @@
-js
 import { setCors } from "../../lib/cors.js";
 import { getAuthenticatedUser } from "../../lib/auth.js";
 import {
