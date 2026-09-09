@@ -21,7 +21,8 @@ const ALLOWED_TYPES = new Set([
   "profile_cosmetic",
   "profile_title",
   "profile_badge",
-  "profile_theme"
+  "profile_theme",
+  "bundle"
 ]);
 
 
@@ -63,6 +64,17 @@ function cleanItem(item) {
 
     limited:
       item.limited === true,
+
+    /*
+     * Bundles contain an array of
+     * shop item IDs.
+     *
+     * Normal items simply return [].
+     */
+    items:
+      Array.isArray(item.items)
+        ? item.items
+        : [],
 
     createdAt:
       item.createdAt || null,
@@ -118,6 +130,29 @@ function createItemId(name) {
     base ||
     `item-${Date.now()}`
   );
+
+}
+
+
+/* ==========================================
+   CLEAN BUNDLE ITEMS
+========================================== */
+
+function cleanBundleItems(items) {
+
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      items
+        .map(item =>
+          String(item || "").trim()
+        )
+        .filter(Boolean)
+    )
+  ];
 
 }
 
@@ -248,7 +283,8 @@ export default async function handler(
         icon,
         image,
         active,
-        limited
+        limited,
+        items
       } = req.body || {};
 
 
@@ -289,6 +325,10 @@ export default async function handler(
 
       const cleanPrice =
         Number(price);
+
+
+      const cleanBundleItems =
+        cleanBundleItemsInput(items);
 
 
       /* ==========================================
@@ -391,6 +431,104 @@ export default async function handler(
             "Price must be a whole number greater than or equal to zero."
 
         });
+
+      }
+
+
+      /* ==========================================
+         VALIDATE BUNDLE
+      ========================================== */
+
+      if (
+        cleanType === "bundle"
+      ) {
+
+        if (
+          cleanBundleItems.length < 2
+        ) {
+
+          return res.status(400).json({
+
+            success: false,
+
+            error:
+              "A bundle must contain at least 2 items."
+
+          });
+
+        }
+
+
+        /*
+         * Bundles cannot contain other bundles.
+         *
+         * This keeps the structure simple:
+         *
+         * Bundle
+         *   ├── Item
+         *   ├── Item
+         *   └── Item
+         */
+
+        const bundleItems =
+          await collection
+            .find({
+
+              _id: {
+                $in:
+                  cleanBundleItems
+              },
+
+              active:
+                true,
+
+              type: {
+                $ne:
+                  "bundle"
+              }
+
+            })
+            .project({
+              _id: 1
+            })
+            .toArray();
+
+
+        const validIds =
+          new Set(
+            bundleItems.map(
+              item =>
+                String(item._id)
+            )
+          );
+
+
+        const invalidIds =
+          cleanBundleItems.filter(
+            id =>
+              !validIds.has(
+                String(id)
+              )
+          );
+
+
+        if (
+          invalidIds.length > 0
+        ) {
+
+          return res.status(400).json({
+
+            success: false,
+
+            error:
+              "One or more bundle items are invalid, inactive, or are another bundle.",
+
+            invalidItems:
+              invalidIds
+
+          });
+
+        }
 
       }
 
@@ -521,6 +659,7 @@ export default async function handler(
          * profile_title
          * profile_badge
          * profile_theme
+         * bundle
          */
         type:
           cleanType,
@@ -536,6 +675,15 @@ export default async function handler(
 
         limited:
           limited === true,
+
+        /*
+         * Only bundles actually contain
+         * item IDs.
+         */
+        items:
+          cleanType === "bundle"
+            ? cleanBundleItems
+            : [],
 
         createdAt:
           now,
@@ -587,7 +735,12 @@ export default async function handler(
             active !== false,
 
           limited:
-            limited === true
+            limited === true,
+
+          items:
+            cleanType === "bundle"
+              ? cleanBundleItems
+              : []
 
         }
 
@@ -643,5 +796,30 @@ export default async function handler(
       "Method not allowed."
 
   });
+
+}
+
+
+/* ==========================================
+   BUNDLE ITEM CLEANER
+========================================== */
+
+function cleanBundleItemsInput(
+  items
+) {
+
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  return [
+    ...new Set(
+      items
+        .map(item =>
+          String(item || "").trim()
+        )
+        .filter(Boolean)
+    )
+  ];
 
 }
