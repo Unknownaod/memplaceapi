@@ -1,4 +1,3 @@
-js
 import { setCors } from "../../lib/cors.js";
 import { getDb } from "../../lib/mongodb.js";
 
@@ -105,31 +104,6 @@ export default async function handler(req, res) {
         .toArray();
 
 
-    /*
-    ==========================================
-    FORMAT SHOP ITEMS
-    ==========================================
-    
-    Supports both:
-
-    Normal item:
-    {
-      type: "profile_cosmetic"
-    }
-
-    Bundle:
-    {
-      type: "bundle",
-      items: [
-        "item-id-1",
-        "item-id-2",
-        "item-id-3"
-      ]
-    }
-
-    ==========================================
-    */
-
     const formattedItems =
       items.map(item => {
 
@@ -143,18 +117,6 @@ export default async function handler(req, res) {
           active: item.active
         };
 
-
-        /*
-        ==========================================
-        BUNDLE SUPPORT
-        ==========================================
-        
-        If this item is a bundle, return the
-        item IDs that are included in it.
-
-        No bundles are created here.
-        ==========================================
-        */
 
         if (item.type === "bundle") {
 
