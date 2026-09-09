@@ -5,56 +5,80 @@ import {
   getMongoClient
 } from "../../lib/mongodb.js";
 
+
 export default async function handler(req, res) {
+
   if (setCors(req, res)) {
     return;
   }
 
+
   if (req.method !== "POST") {
+
     return res.status(405).json({
       success: false,
       error: "Method not allowed"
     });
+
   }
+
 
   let session = null;
 
+
   try {
+
     const user =
       await getAuthenticatedUser(req);
 
+
     if (!user) {
+
       return res.status(401).json({
         success: false,
         error: "Authentication required."
       });
+
     }
+
 
     const {
       itemId
     } = req.body || {};
 
+
     if (
       typeof itemId !== "string" ||
       !itemId.trim()
     ) {
+
       return res.status(400).json({
         success: false,
         error: "Item ID is required."
       });
+
     }
 
-    const db = await getDb();
-    const client = getMongoClient();
 
-    session = client.startSession();
+    const db =
+      await getDb();
+
+    const client =
+      getMongoClient();
+
+
+    session =
+      client.startSession();
+
 
     let purchasedItem = null;
     let purchasedItems = [];
     let newBalance = null;
 
+
     await session.withTransaction(
       async () => {
+
 
         /*
         ==========================================
@@ -63,21 +87,27 @@ export default async function handler(req, res) {
         */
 
         const item =
-          await db.collection("shop_items").findOne(
-            {
-              _id: itemId,
-              active: true
-            },
-            {
-              session
-            }
-          );
+          await db
+            .collection("shop_items")
+            .findOne(
+              {
+                _id: itemId.trim(),
+                active: true
+              },
+              {
+                session
+              }
+            );
+
 
         if (!item) {
+
           throw new Error(
             "SHOP_ITEM_NOT_FOUND"
           );
+
         }
+
 
         /*
         ==========================================
@@ -89,10 +119,13 @@ export default async function handler(req, res) {
           !Number.isInteger(item.price) ||
           item.price < 0
         ) {
+
           throw new Error(
             "INVALID_SHOP_ITEM"
           );
+
         }
+
 
         /*
         ==========================================
@@ -102,16 +135,22 @@ export default async function handler(req, res) {
 
         let itemIds = [];
 
-        if (item.type === "bundle") {
+
+        if (
+          item.type === "bundle"
+        ) {
 
           if (
             !Array.isArray(item.items) ||
             item.items.length === 0
           ) {
+
             throw new Error(
               "INVALID_SHOP_BUNDLE"
             );
+
           }
+
 
           itemIds = [
             ...new Set(
@@ -121,13 +160,22 @@ export default async function handler(req, res) {
                     typeof id === "string" &&
                     id.trim()
                 )
+                .map(
+                  id =>
+                    id.trim()
+                )
             )
           ];
 
-          if (itemIds.length === 0) {
+
+          if (
+            itemIds.length === 0
+          ) {
+
             throw new Error(
               "INVALID_SHOP_BUNDLE"
             );
+
           }
 
         } else {
@@ -137,6 +185,7 @@ export default async function handler(req, res) {
           ];
 
         }
+
 
         /*
         ==========================================
@@ -152,6 +201,7 @@ export default async function handler(req, res) {
                 _id: {
                   $in: itemIds
                 },
+
                 active: true
               },
               {
@@ -160,14 +210,40 @@ export default async function handler(req, res) {
             )
             .toArray();
 
+
         if (
           includedItems.length !==
           itemIds.length
         ) {
+
           throw new Error(
             "INVALID_SHOP_BUNDLE"
           );
+
         }
+
+
+        /*
+        ==========================================
+        MAKE SURE BUNDLES CANNOT CONTAIN
+        OTHER BUNDLES
+        ==========================================
+        */
+
+        if (
+          item.type === "bundle" &&
+          includedItems.some(
+            includedItem =>
+              includedItem.type === "bundle"
+          )
+        ) {
+
+          throw new Error(
+            "INVALID_SHOP_BUNDLE"
+          );
+
+        }
+
 
         /*
         ==========================================
@@ -180,6 +256,7 @@ export default async function handler(req, res) {
             id =>
               `${user._id}:${id}`
           );
+
 
         const existingItems =
           await db
@@ -196,11 +273,65 @@ export default async function handler(req, res) {
             )
             .toArray();
 
-        if (existingItems.length > 0) {
+
+        if (
+          existingItems.length > 0
+        ) {
+
           throw new Error(
             "ITEM_ALREADY_OWNED"
           );
+
         }
+
+
+        /*
+        ==========================================
+        CHECK BUNDLE OWNERSHIP
+        ==========================================
+
+        This is normally redundant because owning
+        an included item already prevents buying
+        the bundle again.
+
+        It is kept here so the bundle itself is
+        explicitly treated as an owned product.
+        */
+
+        if (
+          item.type === "bundle"
+        ) {
+
+          const existingBundle =
+            await db
+              .collection("minigame_inventory")
+              .findOne(
+                {
+                  _id:
+                    `${user._id}:${item._id}`,
+
+                  userId:
+                    user._id,
+
+                  itemId:
+                    item._id
+                },
+                {
+                  session
+                }
+              );
+
+
+          if (existingBundle) {
+
+            throw new Error(
+              "ITEM_ALREADY_OWNED"
+            );
+
+          }
+
+        }
+
 
         /*
         ==========================================
@@ -213,30 +344,44 @@ export default async function handler(req, res) {
             .collection("minigame_users")
             .findOneAndUpdate(
               {
-                _id: user._id,
+                _id:
+                  user._id,
+
                 balance: {
-                  $gte: item.price
+                  $gte:
+                    item.price
                 }
               },
+
               {
                 $inc: {
-                  balance: -item.price
+                  balance:
+                    -item.price
                 },
+
                 $set: {
-                  updatedAt: new Date()
+                  updatedAt:
+                    new Date()
                 }
               },
+
               {
                 session,
-                returnDocument: "after"
+
+                returnDocument:
+                  "after"
               }
             );
 
+
         if (!balanceUpdate) {
+
           throw new Error(
             "INSUFFICIENT_BALANCE"
           );
+
         }
+
 
         /*
         ==========================================
@@ -244,11 +389,14 @@ export default async function handler(req, res) {
         ==========================================
         */
 
-        const now = new Date();
+        const now =
+          new Date();
+
 
         const inventoryDocuments =
           includedItems.map(
             includedItem => ({
+
               _id:
                 `${user._id}:${includedItem._id}`,
 
@@ -258,13 +406,64 @@ export default async function handler(req, res) {
               itemId:
                 includedItem._id,
 
-              quantity: 1,
+              quantity:
+                1,
 
-              purchasedAt: now,
+              purchasedAt:
+                now,
 
-              updatedAt: now
+              updatedAt:
+                now
+
             })
           );
+
+
+        /*
+        ==========================================
+        ADD BUNDLE OWNERSHIP RECORD
+        ==========================================
+        */
+
+        if (
+          item.type === "bundle"
+        ) {
+
+          inventoryDocuments.push({
+
+            _id:
+              `${user._id}:${item._id}`,
+
+            userId:
+              user._id,
+
+            itemId:
+              item._id,
+
+            quantity:
+              1,
+
+            purchasedAt:
+              now,
+
+            updatedAt:
+              now,
+
+            /*
+             * Useful for identifying this
+             * record as a bundle ownership
+             * record.
+             */
+            type:
+              "bundle",
+
+            includedItems:
+              itemIds
+
+          });
+
+        }
+
 
         await db
           .collection("minigame_inventory")
@@ -274,6 +473,7 @@ export default async function handler(req, res) {
               session
             }
           );
+
 
         /*
         ==========================================
@@ -285,6 +485,7 @@ export default async function handler(req, res) {
           .collection("shop_transactions")
           .insertOne(
             {
+
               userId:
                 user._id,
 
@@ -303,6 +504,7 @@ export default async function handler(req, res) {
               purchasedItems:
                 includedItems.map(
                   includedItem => ({
+
                     id:
                       includedItem._id,
 
@@ -311,16 +513,19 @@ export default async function handler(req, res) {
 
                     type:
                       includedItem.type
+
                   })
                 ),
 
               purchasedAt:
                 now
+
             },
             {
               session
             }
           );
+
 
         /*
         ==========================================
@@ -331,6 +536,7 @@ export default async function handler(req, res) {
         purchasedItems =
           includedItems.map(
             includedItem => ({
+
               id:
                 includedItem._id,
 
@@ -339,10 +545,13 @@ export default async function handler(req, res) {
 
               type:
                 includedItem.type
+
             })
           );
 
+
         purchasedItem = {
+
           id:
             item._id,
 
@@ -354,18 +563,29 @@ export default async function handler(req, res) {
 
           price:
             item.price
+
         };
+
 
         newBalance =
           balanceUpdate.balance;
+
       }
     );
 
+
+    /*
+    ==========================================
+    RESPONSE
+    ==========================================
+    */
+
     return res.status(200).json({
-      success: true,
+
+      success:
+        true,
 
       message:
-        itemId === purchasedItem?.id &&
         purchasedItem?.type === "bundle"
           ? "Bundle purchased successfully."
           : "Item purchased successfully.",
@@ -378,7 +598,9 @@ export default async function handler(req, res) {
 
       balance:
         newBalance
+
     });
+
 
   } catch (error) {
 
@@ -387,73 +609,115 @@ export default async function handler(req, res) {
       error
     );
 
+
     if (
       error.message ===
       "SHOP_ITEM_NOT_FOUND"
     ) {
+
       return res.status(404).json({
-        success: false,
+
+        success:
+          false,
+
         error:
           "Shop item not found."
+
       });
+
     }
+
 
     if (
       error.message ===
       "ITEM_ALREADY_OWNED"
     ) {
+
       return res.status(409).json({
-        success: false,
+
+        success:
+          false,
+
         error:
           "You already own one or more items in this purchase."
+
       });
+
     }
+
 
     if (
       error.message ===
       "INSUFFICIENT_BALANCE"
     ) {
+
       return res.status(400).json({
-        success: false,
+
+        success:
+          false,
+
         error:
           "Insufficient balance."
+
       });
+
     }
+
 
     if (
       error.message ===
       "INVALID_SHOP_ITEM"
     ) {
+
       return res.status(500).json({
-        success: false,
+
+        success:
+          false,
+
         error:
           "Shop item has an invalid configuration."
+
       });
+
     }
+
 
     if (
       error.message ===
       "INVALID_SHOP_BUNDLE"
     ) {
+
       return res.status(500).json({
-        success: false,
+
+        success:
+          false,
+
         error:
           "Shop bundle has an invalid configuration."
+
       });
+
     }
 
+
     return res.status(500).json({
-      success: false,
+
+      success:
+        false,
+
       error:
         "Internal server error"
+
     });
 
   } finally {
 
     if (session) {
+
       await session.endSession();
+
     }
 
   }
-}
 
+}
