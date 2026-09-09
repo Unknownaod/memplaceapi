@@ -1,3 +1,4 @@
+js
 import { setCors } from "../../lib/cors.js";
 import { getDb } from "../../lib/mongodb.js";
 
@@ -103,17 +104,75 @@ export default async function handler(req, res) {
         })
         .toArray();
 
+
+    /*
+    ==========================================
+    FORMAT SHOP ITEMS
+    ==========================================
+    
+    Supports both:
+
+    Normal item:
+    {
+      type: "profile_cosmetic"
+    }
+
+    Bundle:
+    {
+      type: "bundle",
+      items: [
+        "item-id-1",
+        "item-id-2",
+        "item-id-3"
+      ]
+    }
+
+    ==========================================
+    */
+
+    const formattedItems =
+      items.map(item => {
+
+        const formatted = {
+          id: item._id,
+          name: item.name,
+          description: item.description,
+          price: item.price,
+          type: item.type,
+          icon: item.icon,
+          active: item.active
+        };
+
+
+        /*
+        ==========================================
+        BUNDLE SUPPORT
+        ==========================================
+        
+        If this item is a bundle, return the
+        item IDs that are included in it.
+
+        No bundles are created here.
+        ==========================================
+        */
+
+        if (item.type === "bundle") {
+
+          formatted.items =
+            Array.isArray(item.items)
+              ? item.items
+              : [];
+
+        }
+
+        return formatted;
+
+      });
+
+
     return res.status(200).json({
       success: true,
-      items: items.map(item => ({
-        id: item._id,
-        name: item.name,
-        description: item.description,
-        price: item.price,
-        type: item.type,
-        icon: item.icon,
-        active: item.active
-      }))
+      items: formattedItems
     });
 
   } catch (error) {
@@ -129,3 +188,4 @@ export default async function handler(req, res) {
     });
   }
 }
+
