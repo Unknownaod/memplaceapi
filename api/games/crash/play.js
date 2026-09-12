@@ -1,105 +1,109 @@
 import crypto from "crypto";
 
-import { setCors } from "../../../lib/cors.js";
-import { getAuthenticatedUser } from "../../../lib/auth.js";
-import { getDb } from "../../../lib/mongodb.js";
+import { setCors } from "../../lib/cors.js";
+import { getAuthenticatedUser } from "../../lib/auth.js";
+import {
+  getDb,
+  getMongoClient
+} from "../../lib/mongodb.js";
+
+
+/* ==========================================
+   CONSTANTS
+========================================== */
 
 const MIN_WAGER = 1;
 const MAX_WAGER = 1_000_000;
 
-/*
-=========================================================
-CRASH GAME
 
-POST /api/games/crash/play
-
-Body:
-{
-  "action": "start",
-  "wager": 100
-}
-
-Creates a server-authoritative Crash round.
-
-The crash point is generated ONCE when the round starts.
-The frontend never determines the crash point.
-=========================================================
-*/
+/* ==========================================
+   CRASH POINT GENERATOR
+========================================== */
 
 function generateCrashPoint() {
-  /*
-   * Cryptographically secure random value.
-   *
-   * Most rounds will end at lower multipliers,
-   * while very high multipliers remain possible.
-   */
 
-  const bytes = crypto.randomBytes(6);
+  const bytes =
+    crypto.randomBytes(6);
 
   let random = 0n;
 
   for (const byte of bytes) {
-    random = (random << 8n) + BigInt(byte);
+
+    random =
+      (random << 8n) +
+      BigInt(byte);
+
   }
 
-  const max = (1n << 48n) - 1n;
+  const max =
+    (1n << 48n) - 1n;
 
   const normalized =
-    Number(random) / Number(max);
+    Number(random) /
+    Number(max);
+
 
   /*
-   * House-style crash distribution.
-
-   * Minimum: 1.00x
-   * The curve makes high multipliers progressively rarer.
-   */
+    Small random values can
+    immediately crash at 1.00x.
+  */
 
   if (normalized < 0.01) {
+
     return 1.00;
+
   }
+
+
+  /*
+    Provably random-style
+    crash calculation.
+  */
 
   const crash =
     1 /
     (1 - normalized);
 
-  /*
-   * Keep the game within a sensible maximum.
-   */
 
   const capped =
-    Math.min(crash, 1000);
+    Math.min(
+      crash,
+      1000
+    );
+
 
   return Number(
     capped.toFixed(2)
   );
+
 }
 
+
+/* ==========================================
+   MULTIPLIER CALCULATION
+========================================== */
+
 function calculateMultiplier(startedAt) {
+
   const elapsed =
     Math.max(
       0,
       Date.now() -
-        new Date(startedAt).getTime()
+      new Date(startedAt).getTime()
     );
 
-  /*
-   * Exponential acceleration.
-
-   * 0s   = 1.00x
-   * 1s   ≈ 1.25x
-   * 2s   ≈ 1.56x
-   * 3s   ≈ 1.95x
-   * 4s   ≈ 2.44x
-   * 5s   ≈ 3.05x
-   * 8s   ≈ 5.96x
-   * 10s  ≈ 9.31x
-
-   * The frontend should use this same formula
-   * only for animation. The server remains authoritative.
-   */
 
   const seconds =
     elapsed / 1000;
+
+
+  /*
+    1.00x
+    1.25x after 1 second
+    1.56x after 2 seconds
+    1.95x after 3 seconds
+    etc.
+  */
 
   const multiplier =
     Math.pow(
@@ -107,247 +111,470 @@ function calculateMultiplier(startedAt) {
       seconds
     );
 
+
   return Number(
     Math.max(
       1,
       multiplier
     ).toFixed(2)
   );
+
 }
 
-export default async function handler(
-  req,
-  res
-) {
+
+/* ==========================================
+   HANDLER
+========================================== */
+
+export default async function handler(req, res) {
+
   if (setCors(req, res)) {
     return;
   }
 
+
   if (req.method !== "POST") {
+
     return res.status(405).json({
       success: false,
-      error: "Method not allowed."
+      error: "Method not allowed"
     });
+
   }
 
+
   try {
+
+    /* ========================================
+       AUTHENTICATION
+    ======================================== */
+
     const user =
       await getAuthenticatedUser(req);
 
+
     if (!user) {
+
       return res.status(401).json({
         success: false,
-        error: "You must be logged in."
+        authenticated: false,
+        error: "Not authenticated"
       });
+
     }
+
+
+    /* ========================================
+       PARSE BODY
+    ======================================== */
+
+    let body;
+
+    try {
+
+      body =
+        typeof req.body === "string"
+          ? JSON.parse(req.body)
+          : req.body;
+
+    } catch {
+
+      return res.status(400).json({
+        success: false,
+        error: "Invalid JSON body"
+      });
+
+    }
+
+
+    /* ========================================
+       ACTION
+    ======================================== */
+
+    const action =
+      String(body?.action || "")
+        .toLowerCase();
+
+
+    if (action !== "start") {
+
+      return res.status(400).json({
+        success: false,
+        error:
+          "Invalid action. Use 'start'."
+      });
+
+    }
+
+
+    /* ========================================
+       VALIDATE WAGER
+    ======================================== */
+
+    const wager =
+      Number(body?.wager);
+
+
+    if (
+      !Number.isInteger(wager) ||
+      wager <= 0
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        error:
+          "Wager amount must be a positive whole number"
+      });
+
+    }
+
+
+    if (wager < MIN_WAGER) {
+
+      return res.status(400).json({
+        success: false,
+        error:
+          `Minimum wager is ${MIN_WAGER}`
+      });
+
+    }
+
+
+    if (wager > MAX_WAGER) {
+
+      return res.status(400).json({
+        success: false,
+        error:
+          `Maximum wager is ${MAX_WAGER}`
+      });
+
+    }
+
+
+    /* ========================================
+       DATABASE
+    ======================================== */
 
     const db =
       await getDb();
 
-    const {
-      action,
-      wager
-    } = req.body || {};
 
-    /*
-    =====================================================
-    START
-    =====================================================
-    */
+    const client =
+      getMongoClient();
 
-    if (action === "start") {
-      const amount =
-        Number(wager);
 
-      if (
-        !Number.isFinite(amount) ||
-        !Number.isInteger(amount) ||
-        amount < MIN_WAGER ||
-        amount > MAX_WAGER
-      ) {
-        return res.status(400).json({
-          success: false,
-          error:
-            `Wager must be an integer between ${MIN_WAGER} and ${MAX_WAGER}.`
-        });
-      }
+    const session =
+      client.startSession();
 
-      /*
-       * Do not allow multiple active Crash rounds
-       * for the same player.
-       */
 
-      const existing =
-        await db.collection("crash_games")
-          .findOne({
-            userId: user._id,
-            status: "active"
-          });
+    try {
 
-      if (existing) {
-        return res.status(409).json({
-          success: false,
-          error:
-            "You already have an active Crash game.",
-          game: {
-            id: existing._id,
-            wager: existing.wager,
-            startedAt:
-              existing.startedAt
-          }
-        });
-      }
+      let finalBalance = 0;
 
-      /*
-       * Atomically take the wager.
-       */
 
-      const balanceResult =
-        await db.collection("minigame_users")
-          .findOneAndUpdate(
-            {
-              _id: user._id,
-              balance: {
-                $gte: amount
-              }
-            },
-            {
-              $inc: {
-                balance: -amount,
-                totalWagered: amount,
-                gamesPlayed: 1
-              }
-            },
-            {
-              returnDocument: "after"
-            }
-          );
+      const gameId =
+        crypto.randomBytes(24)
+          .toString("hex");
 
-      if (!balanceResult.value) {
-        return res.status(400).json({
-          success: false,
-          error: "Insufficient balance."
-        });
-      }
 
-      const startedAt =
+      const now =
         new Date();
+
 
       const crashPoint =
         generateCrashPoint();
 
-      const gameId =
-        crypto.randomUUID();
 
-      const game = {
-        _id: gameId,
+      /* ======================================
+         TRANSACTION
+      ====================================== */
 
-        userId: user._id,
+      await session.withTransaction(
+        async () => {
 
-        username:
-          user.username ||
-          user.discordUsername ||
-          null,
 
-        wager: amount,
+          /* ==================================
+             CHECK ACTIVE GAME
+          ================================== */
 
-        crashPoint,
+          const existing =
+            await db
+              .collection("crash_games")
+              .findOne(
+                {
+                  userId: user._id,
+                  status: "active"
+                },
+                {
+                  session
+                }
+              );
 
-        startedAt,
 
-        status: "active",
+          if (existing) {
 
-        cashoutMultiplier: null,
+            const error =
+              new Error(
+                "ACTIVE_GAME_EXISTS"
+              );
 
-        payout: 0,
+            error.game =
+              existing;
 
-        profit: -amount,
+            throw error;
 
-        endedAt: null,
+          }
 
-        createdAt: startedAt
-      };
 
-      try {
-        await db
-          .collection("crash_games")
-          .insertOne(game);
-      } catch (error) {
-        /*
-         * If recording the round fails, refund the wager.
-         */
+          /* ==================================
+             DEDUCT WAGER
+          ================================== */
 
-        await db
-          .collection("minigame_users")
-          .updateOne(
-            {
-              _id: user._id
-            },
-            {
-              $inc: {
-                balance: amount,
-                totalWagered: -amount,
-                gamesPlayed: -1
-              }
-            }
-          );
+          const account =
+            await db
+              .collection("minigame_users")
+              .findOneAndUpdate(
+                {
+                  _id: user._id,
 
-        throw error;
-      }
+                  balance: {
+                    $gte: wager
+                  }
+                },
+                {
+                  $inc: {
+                    balance: -wager,
 
-      return res.status(200).json({
-        success: true,
+                    totalWagered:
+                      wager,
 
-        game: {
-          id: game._id,
-          wager: game.wager,
-          startedAt:
-            game.startedAt,
+                    gamesPlayed:
+                      1
+                  },
+
+                  $set: {
+                    updatedAt:
+                      now
+                  }
+                },
+                {
+                  session,
+
+                  returnDocument:
+                    "after"
+                }
+              );
+
 
           /*
-           * Do NOT expose crashPoint here.
-           */
+            MongoDB Node driver 6.x returns
+            the document directly.
+
+            This matches your Dice game.
+          */
+
+          if (!account) {
+
+            throw new Error(
+              "INSUFFICIENT_BALANCE"
+            );
+
+          }
+
+
+          finalBalance =
+            account.balance;
+
+
+          /* ==================================
+             CREATE CRASH GAME
+          ================================== */
+
+          await db
+            .collection("crash_games")
+            .insertOne(
+              {
+                _id:
+                  gameId,
+
+                userId:
+                  user._id,
+
+                username:
+                  user.username ||
+                  user.discordUsername ||
+                  null,
+
+                wager,
+
+                crashPoint,
+
+                startedAt:
+                  now,
+
+                status:
+                  "active",
+
+                cashoutMultiplier:
+                  null,
+
+                payout:
+                  0,
+
+                profit:
+                  -wager,
+
+                endedAt:
+                  null,
+
+                createdAt:
+                  now
+              },
+              {
+                session
+              }
+            );
+
+
+        }
+      );
+
+
+      /* ========================================
+         RESPONSE
+      ======================================== */
+
+      return res.status(200).json({
+
+        success:
+          true,
+
+        game: {
+
+          id:
+            gameId,
+
+          gameId:
+            gameId,
+
+          wager,
+
+          startedAt:
+            now,
 
           status:
-            game.status
+            "active"
+
         },
 
         balance:
-          balanceResult.value.balance
+          finalBalance
+
       });
+
+
+    } finally {
+
+      await session.endSession();
+
     }
 
-    /*
-    =====================================================
-    UNKNOWN ACTION
-    =====================================================
-    */
-
-    return res.status(400).json({
-      success: false,
-      error:
-        "Invalid action. Use 'start'."
-    });
 
   } catch (error) {
+
+
+    /* ========================================
+       ACTIVE GAME
+    ======================================== */
+
+    if (
+      error.message ===
+      "ACTIVE_GAME_EXISTS"
+    ) {
+
+      return res.status(409).json({
+
+        success:
+          false,
+
+        error:
+          "You already have an active Crash game.",
+
+        game: {
+
+          id:
+            error.game._id,
+
+          gameId:
+            error.game._id,
+
+          wager:
+            error.game.wager,
+
+          startedAt:
+            error.game.startedAt,
+
+          status:
+            error.game.status
+
+        }
+
+      });
+
+    }
+
+
+    /* ========================================
+       INSUFFICIENT BALANCE
+    ======================================== */
+
+    if (
+      error.message ===
+      "INSUFFICIENT_BALANCE"
+    ) {
+
+      return res.status(400).json({
+
+        success:
+          false,
+
+        error:
+          "Insufficient balance"
+
+      });
+
+    }
+
+
+    /* ========================================
+       SERVER ERROR
+    ======================================== */
+
     console.error(
       "CRASH PLAY ERROR:",
       error
     );
 
-    if (!res.headersSent) {
-      return res.status(500).json({
-        success: false,
-        error:
-          "Internal server error."
-      });
-    }
+
+    return res.status(500).json({
+
+      success:
+        false,
+
+      error:
+        "Internal server error"
+
+    });
+
   }
+
 }
 
-/*
-Exported for the cashout route.
-*/
+
+/* ==========================================
+   EXPORT MULTIPLIER
+========================================== */
+
 export {
   calculateMultiplier
 };
