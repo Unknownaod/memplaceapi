@@ -1,8 +1,8 @@
 import crypto from "crypto";
 
-import { setCors } from "../../lib/cors.js";
-import { getAuthenticatedUser } from "../../lib/auth.js";
-import { getDb } from "../../lib/mongodb.js";
+import { setCors } from "../../../lib/cors.js";
+import { getAuthenticatedUser } from "../../../lib/auth.js";
+import { getDb } from "../../../lib/mongodb.js";
 
 const MIN_WAGER = 1;
 const MAX_WAGER = 1_000_000;
