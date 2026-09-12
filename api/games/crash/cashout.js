@@ -1,193 +1,311 @@
-import { setCors } from "../../../lib/cors.js";
-import { getAuthenticatedUser } from "../../../lib/auth.js";
-import { getDb } from "../../../lib/mongodb.js";
+import { setCors } from "../../lib/cors.js";
+import { getAuthenticatedUser } from "../../lib/auth.js";
+import { getDb } from "../../lib/mongodb.js";
 
 import {
   calculateMultiplier
 } from "./play.js";
 
-/*
-=========================================================
-CRASH CASHOUT
 
-POST /api/games/crash/cashout
+/* ==========================================
+   HANDLER
+========================================== */
 
-Body:
-{
-  "gameId": "..."
-}
+export default async function handler(req, res) {
 
-The server calculates the multiplier from the
-server-side start time.
-
-The client cannot tell the server what multiplier
-to cash out at.
-=========================================================
-*/
-
-export default async function handler(
-  req,
-  res
-) {
   if (setCors(req, res)) {
     return;
   }
 
+
   if (req.method !== "POST") {
+
     return res.status(405).json({
       success: false,
-      error: "Method not allowed."
+      error: "Method not allowed"
     });
+
   }
 
+
   try {
+
+    /* ========================================
+       AUTHENTICATION
+    ======================================== */
+
     const user =
       await getAuthenticatedUser(req);
 
+
     if (!user) {
+
       return res.status(401).json({
         success: false,
-        error:
-          "You must be logged in."
+        authenticated: false,
+        error: "Not authenticated"
       });
+
     }
 
-    const {
-      gameId
-    } = req.body || {};
 
-    if (!gameId) {
+    /* ========================================
+       PARSE BODY
+    ======================================== */
+
+    let body;
+
+    try {
+
+      body =
+        typeof req.body === "string"
+          ? JSON.parse(req.body)
+          : req.body;
+
+    } catch {
+
       return res.status(400).json({
         success: false,
-        error:
-          "gameId is required."
+        error: "Invalid JSON body"
       });
+
     }
+
+
+    /* ========================================
+       GAME ID
+    ======================================== */
+
+    const gameId =
+      String(body?.gameId || "")
+        .trim();
+
+
+    if (!gameId) {
+
+      return res.status(400).json({
+        success: false,
+        error: "gameId is required"
+      });
+
+    }
+
+
+    /* ========================================
+       DATABASE
+    ======================================== */
 
     const db =
       await getDb();
 
-    /*
-     * Fetch the active round.
-     */
+
+    /* ========================================
+       FIND ACTIVE GAME
+    ======================================== */
 
     const game =
-      await db.collection("crash_games")
+      await db
+        .collection("crash_games")
         .findOne({
-          _id: String(gameId),
-          userId: user._id,
-          status: "active"
+          _id:
+            gameId,
+
+          userId:
+            user._id,
+
+          status:
+            "active"
         });
 
+
     if (!game) {
+
       return res.status(404).json({
         success: false,
         error:
-          "Active Crash game not found."
+          "Active Crash game not found"
       });
+
     }
 
-    /*
-     * Calculate the server-authoritative
-     * multiplier at this exact moment.
-     */
+
+    /* ========================================
+       CURRENT MULTIPLIER
+    ======================================== */
 
     const multiplier =
       calculateMultiplier(
         game.startedAt
       );
 
-    /*
-     * The round has already crashed.
-     */
+
+    /* ========================================
+       CRASH CHECK
+    ======================================== */
 
     if (
       multiplier >=
       game.crashPoint
     ) {
+
+
+      /*
+        The player tried to cash out
+        after the server-side crash point.
+      */
+
       const endedAt =
         new Date();
+
 
       const result =
         await db
           .collection("crash_games")
           .findOneAndUpdate(
             {
-              _id: game._id,
-              userId: user._id,
-              status: "active"
+              _id:
+                game._id,
+
+              userId:
+                user._id,
+
+              status:
+                "active"
             },
             {
               $set: {
-                status: "crashed",
+
+                status:
+                  "crashed",
+
                 endedAt,
-                payout: 0,
-                profit: -game.wager
+
+                cashoutMultiplier:
+                  null,
+
+                payout:
+                  0,
+
+                profit:
+                  -game.wager
+
               }
             },
             {
-              returnDocument: "after"
+              returnDocument:
+                "after"
             }
           );
 
-      /*
-       * If another request already finalized
-       * the round, don't pay anything.
-       */
 
-      if (!result.value) {
+      /*
+        MongoDB Node driver 6.x
+        returns the document directly.
+      */
+
+      if (!result) {
+
         return res.status(409).json({
           success: false,
           error:
-            "This game has already ended."
+            "This game has already ended"
         });
+
       }
+
+
+      /* ======================================
+         UPDATE LOSS STATISTICS
+      ====================================== */
 
       await db
         .collection("minigame_users")
         .updateOne(
           {
-            _id: user._id
+            _id:
+              user._id
           },
           {
             $inc: {
+
               totalLost:
                 game.wager,
-              gamesLost: 1
+
+              gamesLost:
+                1
+
+            },
+
+            $set: {
+              updatedAt:
+                endedAt
             }
           }
         );
+
+
+      /* ======================================
+         GET UPDATED BALANCE
+      ====================================== */
 
       const updatedUser =
         await db
           .collection("minigame_users")
           .findOne({
-            _id: user._id
+            _id:
+              user._id
           });
 
-      return res.status(200).json({
-        success: true,
 
-        result: "crashed",
+      return res.status(200).json({
+
+        success:
+          true,
+
+        result:
+          "crashed",
 
         game: {
-          id: game._id,
-          wager: game.wager,
+
+          id:
+            game._id,
+
+          gameId:
+            game._id,
+
+          wager:
+            game.wager,
+
           multiplier:
             game.crashPoint,
-          payout: 0,
-          profit: -game.wager,
-          status: "crashed"
+
+          crashPoint:
+            game.crashPoint,
+
+          payout:
+            0,
+
+          profit:
+            -game.wager,
+
+          status:
+            "crashed",
+
+          endedAt
+
         },
 
         balance:
           updatedUser?.balance ?? 0
+
       });
+
     }
 
-    /*
-     * Successful cashout.
-     */
+
+    /* ========================================
+       CALCULATE PAYOUT
+    ======================================== */
 
     const payout =
       Math.floor(
@@ -195,66 +313,85 @@ export default async function handler(
         multiplier
       );
 
+
     const profit =
       payout -
       game.wager;
 
+
     const endedAt =
       new Date();
 
-    /*
-     * First finalize the game.
-     *
-     * This conditional update prevents two
-     * simultaneous cashout requests from both
-     * paying the player.
-     */
+
+    /* ========================================
+       SETTLE GAME
+    ======================================== */
 
     const result =
       await db
         .collection("crash_games")
         .findOneAndUpdate(
           {
-            _id: game._id,
-            userId: user._id,
-            status: "active"
+            _id:
+              game._id,
+
+            userId:
+              user._id,
+
+            status:
+              "active"
           },
           {
             $set: {
-              status: "cashed_out",
+
+              status:
+                "cashed_out",
+
               cashoutMultiplier:
                 multiplier,
+
               payout,
+
               profit,
+
               endedAt
+
             }
           },
           {
-            returnDocument: "after"
+            returnDocument:
+              "after"
           }
         );
 
-    if (!result.value) {
+
+    if (!result) {
+
       return res.status(409).json({
         success: false,
         error:
-          "This game has already ended."
+          "This game has already ended"
       });
+
     }
 
-    /*
-     * Credit payout and update statistics.
-     */
+
+    /* ========================================
+       PAY PLAYER
+    ======================================== */
 
     await db
       .collection("minigame_users")
       .updateOne(
         {
-          _id: user._id
+          _id:
+            user._id
         },
         {
           $inc: {
-            balance: payout,
+
+            balance:
+              payout,
 
             totalWon:
               profit > 0
@@ -275,24 +412,49 @@ export default async function handler(
               profit < 0
                 ? 1
                 : 0
+
+          },
+
+          $set: {
+            updatedAt:
+              endedAt
           }
         }
       );
+
+
+    /* ========================================
+       GET UPDATED BALANCE
+    ======================================== */
 
     const updatedUser =
       await db
         .collection("minigame_users")
         .findOne({
-          _id: user._id
+          _id:
+            user._id
         });
 
-    return res.status(200).json({
-      success: true,
 
-      result: "cashed_out",
+    /* ========================================
+       RESPONSE
+    ======================================== */
+
+    return res.status(200).json({
+
+      success:
+        true,
+
+      result:
+        "cashed_out",
 
       game: {
-        id: game._id,
+
+        id:
+          game._id,
+
+        gameId:
+          game._id,
 
         wager:
           game.wager,
@@ -307,25 +469,40 @@ export default async function handler(
           game.crashPoint,
 
         status:
-          "cashed_out"
+          "cashed_out",
+
+        endedAt
+
       },
 
       balance:
         updatedUser?.balance ?? 0
+
     });
 
+
   } catch (error) {
+
     console.error(
       "CRASH CASHOUT ERROR:",
       error
     );
 
+
     if (!res.headersSent) {
+
       return res.status(500).json({
-        success: false,
+
+        success:
+          false,
+
         error:
-          "Internal server error."
+          "Internal server error"
+
       });
+
     }
+
   }
+
 }
