@@ -1,11 +1,11 @@
 import crypto from "crypto";
 
-import { setCors } from "../../lib/cors.js";
-import { getAuthenticatedUser } from "../../lib/auth.js";
+import { setCors } from "../../../lib/cors.js";
+import { getAuthenticatedUser } from "../../../lib/auth.js";
 import {
   getDb,
   getMongoClient
-} from "../../lib/mongodb.js";
+} from "../../../lib/mongodb.js";
 
 
 /* =========================================================
