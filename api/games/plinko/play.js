@@ -22,7 +22,10 @@ The server decides:
 - payout
 - balance changes
 
-The frontend should only animate the returned path.
+The frontend should ONLY animate the returned path.
+
+IMPORTANT:
+High-risk 10x slots are on BOTH OUTER EDGES.
 =========================================================
 */
 
@@ -68,16 +71,26 @@ const RISK_CONFIG = {
   high: {
     rows: 10,
 
+    /*
+     * HIGH RISK
+     *
+     * 10x is on the two OUTER EDGES.
+     *
+     * Slot:
+     *
+     * 0    1    2    3    4    5    6    7    8
+     * 10x  1x  0.5x 0.2x 0x  0.2x 0.5x  1x  10x
+     */
     multipliers: [
-      0.0,
-      0.2,
-      0.5,
-      1.0,
       10.0,
       1.0,
       0.5,
       0.2,
-      0.0
+      0.0,
+      0.2,
+      0.5,
+      1.0,
+      10.0
     ]
   }
 
@@ -111,11 +124,15 @@ function randomInt(min, max) {
 
 Each row produces:
 
-0 = ball moves left
-1 = ball moves right
+0 = ball moves LEFT
+1 = ball moves RIGHT
 
-The final number of right movements determines
-the landing position.
+The number of right movements determines
+the final landing position.
+
+The server generates the path.
+
+The frontend only animates it.
 ========================================================= */
 
 function generatePath(rows) {
@@ -124,14 +141,9 @@ function generatePath(rows) {
 
   let rights = 0;
 
-  for (
-    let i = 0;
-    i < rows;
-    i++
-  ) {
+  for (let i = 0; i < rows; i++) {
 
-    const direction =
-      randomInt(0, 1);
+    const direction = randomInt(0, 1);
 
     path.push(direction);
 
@@ -151,6 +163,16 @@ function generatePath(rows) {
 
 /* =========================================================
    GET LANDING SLOT
+=========================================================
+
+There are 9 multiplier slots.
+
+A 10-row path can contain 0-10 right movements.
+
+We map those possible outcomes onto slots 0-8.
+
+This keeps the server result aligned with
+the 9 visible multiplier slots.
 ========================================================= */
 
 function getLandingSlot(
@@ -159,19 +181,38 @@ function getLandingSlot(
   slotCount
 ) {
 
+  if (
+    !Number.isFinite(rights) ||
+    !Number.isFinite(rows) ||
+    !Number.isFinite(slotCount) ||
+    rows <= 0 ||
+    slotCount <= 0
+  ) {
+
+    return 0;
+
+  }
+
+
   /*
-   * Scale the possible positions into
-   * the available multiplier slots.
+   * Convert the 0-rows range into
+   * the 0-(slotCount-1) range.
    */
 
   const normalized =
     rights / rows;
+
 
   let slot =
     Math.round(
       normalized *
       (slotCount - 1)
     );
+
+
+  /*
+   * Safety clamp.
+   */
 
   slot =
     Math.max(
@@ -181,6 +222,7 @@ function getLandingSlot(
         slot
       )
     );
+
 
   return slot;
 
@@ -197,8 +239,7 @@ async function recordGame(
   data
 ) {
 
-  const now =
-    new Date();
+  const now = new Date();
 
   await db
     .collection("plinko_games")
@@ -244,20 +285,22 @@ export default async function handler(
   res
 ) {
 
-  /*
-   * CORS
-   */
+  /* =======================================================
+     CORS
+  ======================================================= */
 
   if (
     setCors(req, res)
   ) {
+
     return;
+
   }
 
 
-  /*
-   * POST ONLY
-   */
+  /* =======================================================
+     POST ONLY
+  ======================================================= */
 
   if (
     req.method !== "POST"
@@ -277,12 +320,13 @@ export default async function handler(
 
   try {
 
-    /*
-     * AUTHENTICATION
-     */
+    /* =====================================================
+       AUTHENTICATION
+    ===================================================== */
 
     const user =
       await getAuthenticatedUser(req);
+
 
     if (!user) {
 
@@ -298,26 +342,29 @@ export default async function handler(
     }
 
 
-    /*
-     * READ REQUEST
-     */
+    /* =====================================================
+       READ REQUEST
+    ===================================================== */
 
     const wager =
       Number(
         req.body?.wager
       );
 
+
     const requestedRisk =
       typeof req.body?.risk === "string"
+
         ? req.body.risk
             .trim()
             .toLowerCase()
+
         : "medium";
 
 
-    /*
-     * VALIDATE WAGER
-     */
+    /* =====================================================
+       VALIDATE WAGER
+    ===================================================== */
 
     if (
       !Number.isFinite(wager) ||
@@ -377,9 +424,9 @@ export default async function handler(
     }
 
 
-    /*
-     * VALIDATE RISK
-     */
+    /* =====================================================
+       VALIDATE RISK
+    ===================================================== */
 
     if (
       !Object.prototype.hasOwnProperty.call(
@@ -411,29 +458,31 @@ export default async function handler(
     const risk =
       requestedRisk;
 
+
     const config =
       RISK_CONFIG[risk];
 
 
-    /*
-     * DATABASE
-     */
+    /* =====================================================
+       DATABASE
+    ===================================================== */
 
     const db =
       await getDb();
 
 
-    /*
-     * MAKE SURE THE USER HAS
-     * A MINIGAME ACCOUNT
-     */
+    /* =====================================================
+       MAKE SURE USER HAS A MINIGAME ACCOUNT
+    ===================================================== */
 
     const minigameUser =
       await db
         .collection("minigame_users")
         .findOne({
+
           _id:
             user._id
+
         });
 
 
@@ -451,12 +500,13 @@ export default async function handler(
     }
 
 
-    /*
-     * ATOMICALLY REMOVE WAGER
-     *
-     * This prevents the client from
-     * spending more than their balance.
-     */
+    /* =====================================================
+       ATOMICALLY REMOVE WAGER
+    =====================================================
+
+    This prevents the client from spending
+    more than the available balance.
+    */
 
     const balanceResult =
       await db
@@ -464,6 +514,7 @@ export default async function handler(
         .findOneAndUpdate(
 
           {
+
             _id:
               user._id,
 
@@ -471,9 +522,11 @@ export default async function handler(
               $gte:
                 wager
             }
+
           },
 
           {
+
             $inc: {
 
               balance:
@@ -497,16 +550,18 @@ export default async function handler(
           },
 
           {
+
             returnDocument:
               "after"
+
           }
 
         );
 
 
-    /*
-     * INSUFFICIENT BALANCE
-     */
+    /* =====================================================
+       INSUFFICIENT BALANCE
+    ===================================================== */
 
     if (
       !balanceResult
@@ -527,9 +582,9 @@ export default async function handler(
     }
 
 
-    /*
-     * GENERATE RESULT
-     */
+    /* =====================================================
+       GENERATE SERVER RESULT
+    ===================================================== */
 
     const {
       path,
@@ -540,9 +595,9 @@ export default async function handler(
       );
 
 
-    /*
-     * FIND LANDING SLOT
-     */
+    /* =====================================================
+       FIND LANDING SLOT
+    ===================================================== */
 
     const slot =
       getLandingSlot(
@@ -556,9 +611,9 @@ export default async function handler(
       );
 
 
-    /*
-     * MULTIPLIER
-     */
+    /* =====================================================
+       GET SERVER MULTIPLIER
+    ===================================================== */
 
     const multiplier =
       Number(
@@ -566,9 +621,18 @@ export default async function handler(
       );
 
 
-    /*
-     * CALCULATE PAYOUT
-     */
+    /* =====================================================
+       CALCULATE PAYOUT
+    =====================================================
+
+    payout includes the original wager.
+
+    Examples:
+
+    100 wager × 10x = 1000 payout
+    100 wager × 1x  = 100 payout
+    100 wager × 0x  = 0 payout
+    */
 
     const payout =
       Math.floor(
@@ -582,9 +646,9 @@ export default async function handler(
       wager;
 
 
-    /*
-     * PAY WINNINGS
-     */
+    /* =====================================================
+       PAY WINNINGS
+    ===================================================== */
 
     if (
       payout > 0
@@ -600,6 +664,7 @@ export default async function handler(
           },
 
           {
+
             $inc: {
 
               balance:
@@ -626,9 +691,9 @@ export default async function handler(
 
     } else {
 
-      /*
-       * Complete loss.
-       */
+      /* ===================================================
+         COMPLETE LOSS
+      =================================================== */
 
       await db
         .collection("minigame_users")
@@ -640,6 +705,7 @@ export default async function handler(
           },
 
           {
+
             $inc: {
 
               totalLost:
@@ -664,29 +730,34 @@ export default async function handler(
     }
 
 
-    /*
-     * GET FINAL BALANCE
-     */
+    /* =====================================================
+       GET FINAL BALANCE
+    ===================================================== */
 
     const updatedUser =
       await db
         .collection("minigame_users")
         .findOne(
+
           {
             _id:
               user._id
           },
+
           {
+
             projection: {
               balance: 1
             }
+
           }
+
         );
 
 
-    /*
-     * RECORD GAME
-     */
+    /* =====================================================
+       RECORD GAME
+    ===================================================== */
 
     await recordGame(
 
@@ -695,6 +766,7 @@ export default async function handler(
       user._id,
 
       {
+
         wager,
 
         risk,
@@ -714,9 +786,9 @@ export default async function handler(
     );
 
 
-    /*
-     * SUCCESS
-     */
+    /* =====================================================
+       SUCCESS RESPONSE
+    ===================================================== */
 
     return res.status(200).json({
 
