@@ -22,10 +22,37 @@ The server decides:
 - payout
 - balance changes
 
-The frontend should ONLY animate the returned path.
+The frontend should only animate the returned path.
 
-IMPORTANT:
-High-risk 10x slots are on BOTH OUTER EDGES.
+=========================================================
+MULTIPLIER LAYOUT
+=========================================================
+
+LOW:
+
+10? No.
+
+Low is the safest risk and keeps the best
+multipliers toward the center.
+
+[0.5x, 0.7x, 1.0x, 1.2x, 1.5x, 1.2x, 1.0x, 0.7x, 0.5x]
+
+
+MEDIUM:
+
+Higher volatility with 5x closer to the edges.
+
+[0.2x, 0.5x, 1.0x, 2.0x, 5.0x, 2.0x, 1.0x, 0.5x, 0.2x]
+
+
+HIGH:
+
+Extreme volatility.
+
+10x is ONLY on the two outer edges.
+
+[10x, 1x, 0.5x, 0.2x, 0x, 0.2x, 0.5x, 1x, 10x]
+
 =========================================================
 */
 
@@ -36,7 +63,23 @@ High-risk 10x slots are on BOTH OUTER EDGES.
 
 const RISK_CONFIG = {
 
+  /*
+  =========================================================
+  LOW RISK
+  =========================================================
+
+  Safer distribution.
+
+  Highest multiplier is in the CENTER.
+
+  Slot:
+  0      1      2      3      4      5      6      7      8
+
+  0.5x   0.7x   1x     1.2x   1.5x   1.2x   1x     0.7x   0.5x
+  */
+
   low: {
+
     rows: 10,
 
     multipliers: [
@@ -50,9 +93,27 @@ const RISK_CONFIG = {
       0.7,
       0.5
     ]
+
   },
 
+
+  /*
+  =========================================================
+  MEDIUM RISK
+  =========================================================
+
+  More volatile.
+
+  5x is positioned toward the center.
+
+  Slot:
+  0      1      2      3      4      5      6      7      8
+
+  0.2x   0.5x   1x     2x     5x     2x     1x     0.5x   0.2x
+  */
+
   medium: {
+
     rows: 10,
 
     multipliers: [
@@ -66,21 +127,36 @@ const RISK_CONFIG = {
       0.5,
       0.2
     ]
+
   },
 
+
+  /*
+  =========================================================
+  HIGH RISK
+  =========================================================
+
+  Extreme volatility.
+
+  10x is on BOTH OUTER EDGES.
+
+  The center is the worst possible result.
+
+  Slot:
+  0      1      2      3      4      5      6      7      8
+
+  10x    1x     0.5x   0.2x   0x     0.2x   0.5x   1x     10x
+
+  IMPORTANT:
+  Slot 0 = 10x
+  Slot 8 = 10x
+  Slot 4 = 0x
+  */
+
   high: {
+
     rows: 10,
 
-    /*
-     * HIGH RISK
-     *
-     * 10x is on the two OUTER EDGES.
-     *
-     * Slot:
-     *
-     * 0    1    2    3    4    5    6    7    8
-     * 10x  1x  0.5x 0.2x 0x  0.2x 0.5x  1x  10x
-     */
     multipliers: [
       10.0,
       1.0,
@@ -92,6 +168,7 @@ const RISK_CONFIG = {
       1.0,
       10.0
     ]
+
   }
 
 };
@@ -102,6 +179,7 @@ const RISK_CONFIG = {
 ========================================================= */
 
 const MIN_WAGER = 1;
+
 const MAX_WAGER = 1000000;
 
 
@@ -109,10 +187,14 @@ const MAX_WAGER = 1000000;
    RANDOM INTEGER
 ========================================================= */
 
-function randomInt(min, max) {
+function randomInt(
+  min,
+  max
+) {
 
   return Math.floor(
-    Math.random() * (max - min + 1)
+    Math.random() *
+      (max - min + 1)
   ) + min;
 
 }
@@ -124,38 +206,59 @@ function randomInt(min, max) {
 
 Each row produces:
 
-0 = ball moves LEFT
-1 = ball moves RIGHT
+0 = LEFT
+1 = RIGHT
 
-The number of right movements determines
-the final landing position.
+The path is generated entirely on the server.
 
-The server generates the path.
+The client receives the path and only animates it.
 
-The frontend only animates it.
 ========================================================= */
 
-function generatePath(rows) {
+function generatePath(
+  rows
+) {
 
   const path = [];
 
   let rights = 0;
 
-  for (let i = 0; i < rows; i++) {
 
-    const direction = randomInt(0, 1);
+  for (
+    let i = 0;
+    i < rows;
+    i++
+  ) {
 
-    path.push(direction);
+    const direction =
+      randomInt(
+        0,
+        1
+      );
 
-    if (direction === 1) {
+
+    path.push(
+      direction
+    );
+
+
+    if (
+      direction === 1
+    ) {
+
       rights++;
+
     }
 
   }
 
+
   return {
+
     path,
+
     rights
+
   };
 
 }
@@ -165,14 +268,12 @@ function generatePath(rows) {
    GET LANDING SLOT
 =========================================================
 
-There are 9 multiplier slots.
+10 rows produce 0-10 right movements.
 
-A 10-row path can contain 0-10 right movements.
+The board has 9 multiplier slots.
 
-We map those possible outcomes onto slots 0-8.
+We map the result onto slots 0-8.
 
-This keeps the server result aligned with
-the 9 visible multiplier slots.
 ========================================================= */
 
 function getLandingSlot(
@@ -194,11 +295,6 @@ function getLandingSlot(
   }
 
 
-  /*
-   * Convert the 0-rows range into
-   * the 0-(slotCount-1) range.
-   */
-
   const normalized =
     rights / rows;
 
@@ -206,13 +302,9 @@ function getLandingSlot(
   let slot =
     Math.round(
       normalized *
-      (slotCount - 1)
+        (slotCount - 1)
     );
 
-
-  /*
-   * Safety clamp.
-   */
 
   slot =
     Math.max(
@@ -239,10 +331,14 @@ async function recordGame(
   data
 ) {
 
-  const now = new Date();
+  const now =
+    new Date();
+
 
   await db
-    .collection("plinko_games")
+    .collection(
+      "plinko_games"
+    )
     .insertOne({
 
       userId,
@@ -290,7 +386,10 @@ export default async function handler(
   ======================================================= */
 
   if (
-    setCors(req, res)
+    setCors(
+      req,
+      res
+    )
   ) {
 
     return;
@@ -306,7 +405,9 @@ export default async function handler(
     req.method !== "POST"
   ) {
 
-    return res.status(405).json({
+    return res.status(
+      405
+    ).json({
 
       success: false,
 
@@ -325,12 +426,16 @@ export default async function handler(
     ===================================================== */
 
     const user =
-      await getAuthenticatedUser(req);
+      await getAuthenticatedUser(
+        req
+      );
 
 
     if (!user) {
 
-      return res.status(401).json({
+      return res.status(
+        401
+      ).json({
 
         success: false,
 
@@ -367,11 +472,17 @@ export default async function handler(
     ===================================================== */
 
     if (
-      !Number.isFinite(wager) ||
-      !Number.isInteger(wager)
+      !Number.isFinite(
+        wager
+      ) ||
+      !Number.isInteger(
+        wager
+      )
     ) {
 
-      return res.status(400).json({
+      return res.status(
+        400
+      ).json({
 
         success: false,
 
@@ -390,7 +501,9 @@ export default async function handler(
       wager < MIN_WAGER
     ) {
 
-      return res.status(400).json({
+      return res.status(
+        400
+      ).json({
 
         success: false,
 
@@ -409,7 +522,9 @@ export default async function handler(
       wager > MAX_WAGER
     ) {
 
-      return res.status(400).json({
+      return res.status(
+        400
+      ).json({
 
         success: false,
 
@@ -435,7 +550,9 @@ export default async function handler(
       )
     ) {
 
-      return res.status(400).json({
+      return res.status(
+        400
+      ).json({
 
         success: false,
 
@@ -460,7 +577,9 @@ export default async function handler(
 
 
     const config =
-      RISK_CONFIG[risk];
+      RISK_CONFIG[
+        risk
+      ];
 
 
     /* =====================================================
@@ -472,12 +591,14 @@ export default async function handler(
 
 
     /* =====================================================
-       MAKE SURE USER HAS A MINIGAME ACCOUNT
+       FIND MINIGAME USER
     ===================================================== */
 
     const minigameUser =
       await db
-        .collection("minigame_users")
+        .collection(
+          "minigame_users"
+        )
         .findOne({
 
           _id:
@@ -488,7 +609,9 @@ export default async function handler(
 
     if (!minigameUser) {
 
-      return res.status(404).json({
+      return res.status(
+        404
+      ).json({
 
         success: false,
 
@@ -501,16 +624,19 @@ export default async function handler(
 
 
     /* =====================================================
-       ATOMICALLY REMOVE WAGER
+       REMOVE WAGER ATOMICALLY
     =====================================================
 
-    This prevents the client from spending
-    more than the available balance.
-    */
+    This makes sure the user cannot wager more
+    than their current balance.
+
+    ===================================================== */
 
     const balanceResult =
       await db
-        .collection("minigame_users")
+        .collection(
+          "minigame_users"
+        )
         .findOneAndUpdate(
 
           {
@@ -567,7 +693,9 @@ export default async function handler(
       !balanceResult
     ) {
 
-      return res.status(400).json({
+      return res.status(
+        400
+      ).json({
 
         success: false,
 
@@ -583,7 +711,7 @@ export default async function handler(
 
 
     /* =====================================================
-       GENERATE SERVER RESULT
+       GENERATE SERVER PATH
     ===================================================== */
 
     const {
@@ -606,38 +734,40 @@ export default async function handler(
 
         config.rows,
 
-        config.multipliers.length
+        config
+          .multipliers
+          .length
 
       );
 
 
     /* =====================================================
-       GET SERVER MULTIPLIER
+       GET MULTIPLIER
+    =====================================================
+
+    THIS IS THE AUTHORITATIVE MULTIPLIER.
+
+    The client cannot choose this value.
+
     ===================================================== */
 
     const multiplier =
       Number(
-        config.multipliers[slot]
+        config
+          .multipliers[
+            slot
+          ]
       );
 
 
     /* =====================================================
        CALCULATE PAYOUT
-    =====================================================
-
-    payout includes the original wager.
-
-    Examples:
-
-    100 wager × 10x = 1000 payout
-    100 wager × 1x  = 100 payout
-    100 wager × 0x  = 0 payout
-    */
+    ===================================================== */
 
     const payout =
       Math.floor(
         wager *
-        multiplier
+          multiplier
       );
 
 
@@ -655,7 +785,9 @@ export default async function handler(
     ) {
 
       await db
-        .collection("minigame_users")
+        .collection(
+          "minigame_users"
+        )
         .updateOne(
 
           {
@@ -696,7 +828,9 @@ export default async function handler(
       =================================================== */
 
       await db
-        .collection("minigame_users")
+        .collection(
+          "minigame_users"
+        )
         .updateOne(
 
           {
@@ -736,7 +870,9 @@ export default async function handler(
 
     const updatedUser =
       await db
-        .collection("minigame_users")
+        .collection(
+          "minigame_users"
+        )
         .findOne(
 
           {
@@ -747,7 +883,9 @@ export default async function handler(
           {
 
             projection: {
+
               balance: 1
+
             }
 
           }
@@ -787,10 +925,12 @@ export default async function handler(
 
 
     /* =====================================================
-       SUCCESS RESPONSE
+       SUCCESS
     ===================================================== */
 
-    return res.status(200).json({
+    return res.status(
+      200
+    ).json({
 
       success: true,
 
@@ -827,7 +967,9 @@ export default async function handler(
     );
 
 
-    return res.status(500).json({
+    return res.status(
+      500
+    ).json({
 
       success: false,
 
