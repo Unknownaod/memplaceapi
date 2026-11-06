@@ -24,7 +24,7 @@ export default async function handler(req, res) {
     if (error) {
 
       return res.redirect(
-        "https://minigames.memplace.xyz/?discord=denied"
+        "https://games.havenshq.xyz/?discord=denied"
       );
     }
 
@@ -283,7 +283,7 @@ export default async function handler(req, res) {
     ========================================== */
 
     return res.redirect(
-      "https://minigames.memplace.xyz/?discord=connected"
+      "https://games.havenshq.xyz/?discord=connected"
     );
 
 
