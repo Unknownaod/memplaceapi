@@ -23,7 +23,6 @@ app.use((req, res, next) => {
 
   res.setHeader(
     "Access-Control-Allow-Origin",
-    "https://minigames.memplace.xyz",
     "https://games.havenshq.xyz"
   );
 
